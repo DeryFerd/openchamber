@@ -198,6 +198,22 @@ const normalizeOptionalString = (value: unknown): string | undefined => {
     return trimmed.length > 0 ? trimmed : undefined;
 };
 
+// OpenCode 2.x serves the config `model` as ConfigModel.Selection: the short
+// string form or the decoded { providerID, model } object. Both must land in
+// the OpenCode-default slot the same way.
+const normalizeConfigModelSelection = (model: Config["model"]): string | undefined => {
+    const stringForm = normalizeOptionalString(model);
+    if (stringForm !== undefined) {
+        return stringForm;
+    }
+    // SAFETY: what remains is the wire's decoded selection object; both fields
+    // are re-validated through normalizeOptionalString before use.
+    const selection = model as { providerID?: unknown; model?: unknown } | undefined;
+    const providerID = normalizeOptionalString(selection?.providerID);
+    const modelID = normalizeOptionalString(selection?.model);
+    return providerID && modelID ? `${providerID}/${modelID}` : undefined;
+};
+
 const findProviderModel = (
     providers: ProviderWithModelList[],
     providerId: string,
@@ -2410,7 +2426,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 ? normalizeOptionalString(latestSyncedOpencodeConfig.default_agent)
                                 : undefined;
                             const latestSyncedOpencodeDefaultModel = hasLatestSyncedOpencodeConfig
-                                ? normalizeOptionalString(latestSyncedOpencodeConfig.model)
+                                ? normalizeConfigModelSelection(latestSyncedOpencodeConfig.model)
                                 : undefined;
 
                             const providers = get().activeDirectoryKey === directoryKey
@@ -3138,7 +3154,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
 
                     const opencodeDefaultAgent = normalizeOptionalString(syncedConfig.default_agent);
-                    const opencodeDefaultModel = normalizeOptionalString(syncedConfig.model);
+                    const opencodeDefaultModel = normalizeConfigModelSelection(syncedConfig.model);
                     const projectDefaults = getProjectDefaultsForConfigDirectory(configDirectory);
 
                     set((state) => {

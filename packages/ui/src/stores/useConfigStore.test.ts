@@ -2371,3 +2371,47 @@ describe('getModelMetadata limits', () => {
     expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.limit).toEqual({ context: 32_000, output: 4_000 });
   });
 });
+
+describe('applyOpenCodeConfigDefaults with the OpenCode 2.x model selection', () => {
+  const resetDefaults = () => {
+    useConfigStore.setState({
+      directoryScoped: {},
+      opencodeDefaultAgent: undefined,
+      opencodeDefaultModel: undefined,
+    });
+  };
+
+  test('accepts the decoded object form OpenCode 2.x serves', () => {
+    resetDefaults();
+
+    useConfigStore.getState().applyOpenCodeConfigDefaults(DIRECTORY, 'test', {
+      model: { providerID: 'tokenguard', model: 'deepseek-flash' },
+    });
+
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.opencodeDefaultModel).toBe('tokenguard/deepseek-flash');
+  });
+
+  test('keeps accepting the short string form', () => {
+    resetDefaults();
+
+    useConfigStore.getState().applyOpenCodeConfigDefaults(DIRECTORY, 'test', { model: 'tokenguard/deepseek-flash' });
+
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.opencodeDefaultModel).toBe('tokenguard/deepseek-flash');
+  });
+
+  test('an object form missing a field resolves to no default', () => {
+    resetDefaults();
+
+    useConfigStore.getState().applyOpenCodeConfigDefaults(DIRECTORY, 'test', { model: { providerID: 'tokenguard', model: '' } });
+
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.opencodeDefaultModel).toBeUndefined();
+  });
+
+  test('an object form with empty fields resolves to no default', () => {
+    resetDefaults();
+
+    useConfigStore.getState().applyOpenCodeConfigDefaults(DIRECTORY, 'test', { model: { providerID: '', model: 'deepseek-flash' } });
+
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.opencodeDefaultModel).toBeUndefined();
+  });
+});
