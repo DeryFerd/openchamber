@@ -5,6 +5,7 @@ import os from 'node:os';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { getProviderAuth, readAuthFile } from './opencodeAuth';
+import { readConfig } from './opencodeConfig';
 import { fetchExeDevUsage } from './exeDevQuota';
 import { fetchOllamaUsage } from './ollamaQuota';
 
@@ -1980,6 +1981,35 @@ const isOpenRouterPeriod = (value: unknown): value is OpenRouterPeriod => (
   typeof value === 'string' && Object.prototype.hasOwnProperty.call(PERIOD_SECONDS, value)
 );
 
+const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
+
+type OpenRouterProviderConfig = {
+  providers?: { openrouter?: { settings?: { baseURL?: string } } };
+  provider?: { openrouter?: { options?: { baseURL?: string } } };
+};
+
+// The stored key is valid for whichever gateway the configured baseURL points
+// at, so the usage lookup must ride the same base as chat. The endpoint shape
+// stays `<base>/key`; with nothing configured the base is OpenRouter itself.
+// Mirrors packages/web/server/lib/quota/providers/openrouter.js (kept in sync
+// per the quota DOCUMENTATION.md parity note).
+const resolveOpenRouterConfigBase = (): string | null => {
+  try {
+    // SAFETY: opencode.json provider entries are untyped JSON; the shape above
+    // names only the two spellings this provider reads, and asNonEmptyString
+    // re-validates the value before it reaches the URL.
+    const providerConfig = readConfig() as OpenRouterProviderConfig;
+    const base = (
+      asNonEmptyString(providerConfig.providers?.openrouter?.settings?.baseURL)
+      ?? asNonEmptyString(providerConfig.provider?.openrouter?.options?.baseURL)
+    )?.replace(/\/+$/, '');
+    return base || null;
+  } catch {
+    // A config read failure must not take the default-endpoint lookup down.
+    return null;
+  }
+};
+
 const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['openrouter'])) as Record<string, unknown> | null;
@@ -1998,7 +2028,7 @@ const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
   const timeoutSignal = AbortSignal.timeout(15_000);
 
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/key', {
+    const response = await fetch(`${resolveOpenRouterConfigBase() ?? OPENROUTER_API_BASE}/key`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,

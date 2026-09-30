@@ -1,4 +1,5 @@
 import { readAuthFile } from '../../opencode/auth.js';
+import { readConfigLayers } from '../../opencode/shared.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -6,14 +7,31 @@ import {
   toUsageWindow,
   toNumber,
   asObject,
+  asNonEmptyString,
   formatMoney
 } from '../utils/index.js';
 
 export const providerId = 'openrouter';
 export const providerName = 'OpenRouter';
 export const aliases = ['openrouter'];
-const OPENROUTER_QUOTA_URL = 'https://openrouter.ai/api/v1/key';
+const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
 const PERIOD_SECONDS = { daily: 86400, weekly: 604800, monthly: 30 * 86400 };
+
+// The stored key is valid for whichever gateway the configured baseURL points
+// at, so the usage lookup must ride the same base as chat. The endpoint shape
+// stays `<base>/key`; with nothing configured the base is OpenRouter itself.
+const resolveQuotaBase = () => {
+  try {
+    const { mergedConfig } = readConfigLayers();
+    const v2 = mergedConfig?.providers?.openrouter;
+    const legacy = mergedConfig?.provider?.openrouter;
+    const base = asNonEmptyString(v2?.settings?.baseURL) ?? asNonEmptyString(legacy?.options?.baseURL);
+    return base?.replace(/\/+$/, '') || null;
+  } catch {
+    // A config read failure must not take the default-endpoint lookup down.
+    return null;
+  }
+};
 
 export const resolveResetAt = (limitReset, nowMs) => {
   const now = new Date(nowMs);
@@ -54,7 +72,7 @@ export const fetchQuota = async () => {
   const timeoutSignal = AbortSignal.timeout(15_000);
 
   try {
-    const response = await fetch(OPENROUTER_QUOTA_URL, {
+    const response = await fetch(`${resolveQuotaBase() ?? OPENROUTER_API_BASE}/key`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
