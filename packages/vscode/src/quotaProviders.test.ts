@@ -221,6 +221,50 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.equal(requested.url, 'https://legacy.example.com/v1/key');
   });
 
+  test('reads the key endpoint from the legacy provider api field', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile(
+      JSON.stringify({
+        provider: {
+          openrouter: { api: 'https://legacy-api.example.com/v1' },
+        },
+      }),
+      async () => {
+        stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+        await fetchQuotaForProvider('openrouter');
+      },
+    );
+
+    assert.equal(requested.url, 'https://legacy-api.example.com/v1/key');
+  });
+
+  test('strips trailing slashes from the configured baseURL', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile(
+      JSON.stringify({
+        providers: {
+          openrouter: { settings: { baseURL: 'https://gateway.example.com/v1/' } },
+        },
+      }),
+      async () => {
+        stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+        await fetchQuotaForProvider('openrouter');
+      },
+    );
+
+    assert.equal(requested.url, 'https://gateway.example.com/v1/key');
+  });
+
+  test('keeps the default key endpoint when the config cannot be parsed', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile('{ not json', async () => {
+      stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+      await fetchQuotaForProvider('openrouter');
+    });
+
+    assert.equal(requested.url, 'https://openrouter.ai/api/v1/key');
+  });
+
   test('maps an unlimited null-limit key to a monthly spent window', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
       data: { limit: null, limit_remaining: null, limit_reset: null, usage_monthly: 12.5, is_management_key: false },

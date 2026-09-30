@@ -6,6 +6,7 @@ import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { getProviderAuth, readAuthFile } from './opencodeAuth';
 import { readConfig } from './opencodeConfig';
+import { isRecord, toProviderEntity } from './opencode-config-v2';
 import { fetchExeDevUsage } from './exeDevQuota';
 import { fetchOllamaUsage } from './ollamaQuota';
 
@@ -1983,25 +1984,24 @@ const isOpenRouterPeriod = (value: unknown): value is OpenRouterPeriod => (
 
 const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
 
-type OpenRouterProviderConfig = {
-  providers?: { openrouter?: { settings?: { baseURL?: string } } };
-  provider?: { openrouter?: { options?: { baseURL?: string } } };
-};
-
 // The stored key is valid for whichever gateway the configured baseURL points
 // at, so the usage lookup must ride the same base as chat. The endpoint shape
 // stays `<base>/key`; with nothing configured the base is OpenRouter itself.
+// OpenCode takes the address from `settings.baseURL`, legacy `options.baseURL`
+// or legacy `api`, and toProviderEntity folds all three. Each section is read
+// on its own so a v2 entry without an address cannot hide a v1 address that
+// another config file sets.
 // Mirrors packages/web/server/lib/quota/providers/openrouter.js (kept in sync
 // per the quota DOCUMENTATION.md parity note).
 const resolveOpenRouterConfigBase = (): string | null => {
   try {
-    // SAFETY: opencode.json provider entries are untyped JSON; the shape above
-    // names only the two spellings this provider reads, and asNonEmptyString
-    // re-validates the value before it reaches the URL.
-    const providerConfig = readConfig() as OpenRouterProviderConfig;
+    const config = readConfig();
+    const readBaseURL = (sectionKey: 'providers' | 'provider'): string | null => {
+      const section = config[sectionKey];
+      return isRecord(section) ? asNonEmptyString(toProviderEntity(section.openrouter).settings?.baseURL) : null;
+    };
     const base = (
-      asNonEmptyString(providerConfig.providers?.openrouter?.settings?.baseURL)
-      ?? asNonEmptyString(providerConfig.provider?.openrouter?.options?.baseURL)
+      readBaseURL('providers') ?? readBaseURL('provider')
     )?.replace(/\/+$/, '');
     return base || null;
   } catch {

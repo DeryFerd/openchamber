@@ -348,6 +348,37 @@ describe('OpenRouter quota provider', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://legacy.example.com/v1/key');
   });
 
+  it('reads the key endpoint from the legacy provider api field', async () => {
+    writeCustomConfig({
+      provider: {
+        openrouter: { api: 'https://legacy-api.example.com/v1' },
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(DOCUMENTED_PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://legacy-api.example.com/v1/key');
+  });
+
+  it('keeps a legacy baseURL when the v2 entry has no address', async () => {
+    writeCustomConfig({
+      providers: {
+        openrouter: { models: { 'openai/gpt-5': {} } },
+      },
+      provider: {
+        openrouter: { options: { baseURL: 'https://legacy.example.com/v1' } },
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(DOCUMENTED_PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://legacy.example.com/v1/key');
+  });
+
   it('strips trailing slashes from the configured baseURL', async () => {
     writeCustomConfig({
       providers: {

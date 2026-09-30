@@ -1,5 +1,6 @@
 import { readAuthFile } from '../../opencode/auth.js';
 import { readConfigLayers } from '../../opencode/shared.js';
+import { isRecord, toProviderEntity } from '../../opencode/config-v2.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -20,12 +21,18 @@ const PERIOD_SECONDS = { daily: 86400, weekly: 604800, monthly: 30 * 86400 };
 // The stored key is valid for whichever gateway the configured baseURL points
 // at, so the usage lookup must ride the same base as chat. The endpoint shape
 // stays `<base>/key`; with nothing configured the base is OpenRouter itself.
+// OpenCode takes the address from `settings.baseURL`, legacy `options.baseURL`
+// or legacy `api`, and toProviderEntity folds all three. Each section is read
+// on its own so a v2 entry without an address cannot hide a v1 address that
+// another config file sets.
 const resolveQuotaBase = () => {
   try {
     const { mergedConfig } = readConfigLayers();
-    const v2 = mergedConfig?.providers?.openrouter;
-    const legacy = mergedConfig?.provider?.openrouter;
-    const base = asNonEmptyString(v2?.settings?.baseURL) ?? asNonEmptyString(legacy?.options?.baseURL);
+    const readBaseURL = (sectionKey) => {
+      const section = mergedConfig?.[sectionKey];
+      return isRecord(section) ? asNonEmptyString(toProviderEntity(section.openrouter).settings?.baseURL) : null;
+    };
+    const base = readBaseURL('providers') ?? readBaseURL('provider');
     return base?.replace(/\/+$/, '') || null;
   } catch {
     // A config read failure must not take the default-endpoint lookup down.
