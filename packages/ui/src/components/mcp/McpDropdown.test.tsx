@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { opencodeClient } from '@/lib/opencode/client';
 import { I18nProvider } from '@/lib/i18n';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 
@@ -61,6 +62,7 @@ describe('MCP dropdown status reads', () => {
       }
     };
 
+    useDirectoryStore.setState({ currentDirectory: 'C:/proj-a' });
     useMcpStore.setState({
       byDirectory: {},
       diagnosticsByDirectory: {},
@@ -106,5 +108,39 @@ describe('MCP dropdown status reads', () => {
     await act(async () => {});
 
     expect(listSpy.mock.calls.length).toBe(0);
+  });
+
+  test('directory change while inactive issues no status read', async () => {
+    const { McpDropdownContent } = await import('./McpDropdown');
+    await renderNode(<McpDropdownContent active={false} />);
+    await act(async () => {});
+
+    useDirectoryStore.setState({ currentDirectory: 'C:/proj-b' });
+    await act(async () => {});
+
+    expect(listSpy.mock.calls.length).toBe(0);
+  });
+
+  test('directory change while active reads the new directory', async () => {
+    const { McpDropdownContent } = await import('./McpDropdown');
+    await renderNode(<McpDropdownContent active={true} />);
+    await act(async () => {});
+    expect(listSpy.mock.calls.length).toBe(1);
+
+    useDirectoryStore.setState({ currentDirectory: 'C:/proj-b' });
+    await act(async () => {});
+
+    expect(listSpy.mock.calls.length).toBe(2);
+    expect(listSpy.mock.calls[1]?.[0]).toBe('C:/proj-b');
+  });
+
+  test('concurrent freshens issue a single status read', async () => {
+    const first = useMcpStore.getState().ensureFresh({ directory: 'C:/proj-a', silent: true, maxAgeMs: 60_000 });
+    const second = useMcpStore.getState().ensureFresh({ directory: 'C:/proj-a', silent: true, maxAgeMs: 60_000 });
+    await act(async () => {
+      await Promise.all([first, second]);
+    });
+
+    expect(listSpy.mock.calls.length).toBe(1);
   });
 });
