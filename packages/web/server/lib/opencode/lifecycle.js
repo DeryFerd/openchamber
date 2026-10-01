@@ -3,6 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
+import { removeOpenCodeServiceRegistrationForPid } from './service-registration.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { recordStartupPerformance } from './startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
@@ -381,6 +382,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (Number.isInteger(pid) && hasChildProcessExited(child)) {
         await unregisterManagedProcess(pid);
       }
+      await removeOpenCodeServiceRegistrationForPid(pid);
     }
   };
 
@@ -398,7 +400,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   const createManagedOpenCodeServerProcess = async ({ resolvedBinary, hostname, port, timeout, cwd, env: processEnv, shellEnvKeysCount = 0 }) => {
     let binary = (resolvedBinary || process.env.OPENCODE_BINARY || 'opencode').trim() || 'opencode';
     const sourceBinary = binary;
-    let args = ['serve', '--hostname', hostname, '--port', String(port)];
+    // `--service` makes OpenCode publish its service registration so locally
+    // installed plugins can discover this server for interactive permission
+    // prompts; the managed close path removes the registration again so
+    // discovery never probes a dead pid.
+    let args = ['serve', '--service', '--hostname', hostname, '--port', String(port)];
     let launchWrapperType = null;
 
     if (process.platform === 'win32' && state.useWslForOpencode) {

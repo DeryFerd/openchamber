@@ -17,6 +17,7 @@ for (const mode of ['timeout', 'malformed', 'abort', 'ready']) {
     const marker = path.join(cwd, 'pids');
     const registry = path.join(cwd, 'registry');
     const previous = process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
+    const previousStateHome = process.env.XDG_STATE_HOME;
     process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = registry;
     const descendant = `process.on('SIGTERM', () => {}); require('node:fs').appendFileSync(${JSON.stringify(marker)}, process.pid + '\\n'); process.stdout.write('ready'); setInterval(() => {}, 1000);`;
     let message = '';
@@ -52,7 +53,14 @@ for (const mode of ['timeout', 'malformed', 'abort', 'ready']) {
       if (mode === 'ready') {
         assert.equal(error, null);
         assert.equal(server.url, 'http://127.0.0.1:45678');
+        const stateDir = path.join(cwd, 'state');
+        process.env.XDG_STATE_HOME = stateDir;
+        await fs.mkdir(path.join(stateDir, 'opencode'), { recursive: true });
+        const registrationPath = path.join(stateDir, 'opencode', 'service.json');
+        await fs.writeFile(registrationPath, JSON.stringify({ url: server.url, pid: pids[0], version: '2.0.21', password: 'x' }));
         await Promise.all([server.close(), server.close()]);
+        const registrationLeft = await fs.stat(registrationPath).then(() => true, () => false);
+        assert.equal(registrationLeft, false, 'close must remove the managed server\'s service registration');
       } else {
         assert.ok(error);
       }
@@ -66,6 +74,8 @@ for (const mode of ['timeout', 'malformed', 'abort', 'ready']) {
       for (const pid of await readPids(marker)) if (alive(pid)) process.kill(pid, 'SIGKILL');
       if (previous === undefined) delete process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
       else process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = previous;
+      if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME;
+      else process.env.XDG_STATE_HOME = previousStateHome;
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });

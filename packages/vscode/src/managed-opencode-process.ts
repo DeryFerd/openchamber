@@ -1,5 +1,6 @@
 import { spawnOwnedProcess } from './owned-process';
 import { registerManagedProcess, unregisterManagedProcess } from './opencodeProcessRegistry';
+import { removeOpenCodeServiceRegistrationForPid } from './service-registration';
 
 export function spawnManagedOpenCodeProcess(
   binary: string,
@@ -17,6 +18,7 @@ export function spawnManagedOpenCodeProcess(
       await registration;
       await owned.terminate();
       await unregisterManagedProcess(owned.child.pid);
+      await removeOpenCodeServiceRegistrationForPid(owned.child.pid);
     })();
     return closing;
   };

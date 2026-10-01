@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
@@ -665,7 +668,7 @@ describe('OpenCode lifecycle', () => {
     const [binary, args, options] = spawnMock.mock.calls[0];
 
     expect(binary).toBe('opencode');
-    expect(args).toEqual(['serve', '--hostname', '127.0.0.1', '--port', '45678']);
+    expect(args).toEqual(['serve', '--service', '--hostname', '127.0.0.1', '--port', '45678']);
     expect(options.env.PATH).toBe('/home/user/.bun/bin:/usr/local/bin:/usr/bin');
     expect(options.env.SHELL_ONLY).toBe('yes');
     expect(options.env.OPENCODE_PASSWORD).toBe('password');
@@ -692,10 +695,40 @@ describe('OpenCode lifecycle', () => {
     const [binary, args] = spawnMock.mock.calls[0];
 
     expect(binary).toBe('opencode');
-    expect(args).toEqual(['serve', '--hostname', '0.0.0.0', '--port', '45678']);
+    expect(args).toEqual(['serve', '--service', '--hostname', '0.0.0.0', '--port', '45678']);
 
     await server.close();
     expect(server.signalCode).toBe('SIGTERM');
+  });
+
+  it('removes the managed server\'s service registration on close', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const previousStateHome = process.env.XDG_STATE_HOME;
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-lifecycle-registration-'));
+    process.env.XDG_STATE_HOME = stateDir;
+    try {
+      const registrationPath = path.join(stateDir, 'opencode', 'service.json');
+      await fs.mkdir(path.dirname(registrationPath), { recursive: true });
+      await fs.writeFile(registrationPath, JSON.stringify({ url: 'http://127.0.0.1:45678', pid: child.pid, version: '2.0.21', password: 'x' }));
+
+      const runtime = createRuntime();
+      const server = await runtime.startOpenCode();
+      await server.close();
+
+      await expect(fs.stat(registrationPath)).rejects.toThrow();
+    } finally {
+      if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME;
+      else process.env.XDG_STATE_HOME = previousStateHome;
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
   });
 
   it('removes AppImage launcher entries from the managed OpenCode launch env', async () => {

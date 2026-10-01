@@ -743,7 +743,9 @@ function spawnManagedOpenCodeServer(
 ) {
   const binary = stripWrappingQuotes(process.env.OPENCODE_BINARY || 'opencode') || 'opencode';
   assertSupportedOpenCodeBinary(binary);
-  const launch = resolveWindowsLaunchSpec(binary, ['serve', '--hostname', '127.0.0.1', '--port', String(port)]);
+  // `--service` publishes the service registration plugins need to discover
+  // this server for interactive permission prompts (see web lifecycle.js).
+  const launch = resolveWindowsLaunchSpec(binary, ['serve', '--service', '--hostname', '127.0.0.1', '--port', String(port)]);
   return spawnManagedOpenCodeProcess(launch.binary, launch.args, {
     cwd: workingDirectory,
     env,
