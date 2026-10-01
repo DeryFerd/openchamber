@@ -19,7 +19,7 @@ describe('MCP dropdown status reads', () => {
   let listSpy: ReturnType<typeof spyOn>;
   let originalLoadMcpConfigs: LoadMcpConfigs;
   let dom: Window;
-  const loadMcpConfigs = mock(async (_options?: { force?: boolean; directory?: string | null }) => true);
+  const loadMcpConfigs = mock(async () => true);
 
   const renderNode = async (element: React.ReactNode) => {
     const host = document.createElement('div');
