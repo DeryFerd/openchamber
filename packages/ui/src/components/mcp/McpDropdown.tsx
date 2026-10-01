@@ -81,10 +81,6 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
   const [busyName, setBusyName] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    void refresh({ directory, silent: true });
-  }, [refresh, directory]);
-
-  React.useEffect(() => {
     void loadMcpConfigs({ force: true });
   }, [loadMcpConfigs]);
 
@@ -258,13 +254,10 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
 
   const [busyName, setBusyName] = React.useState<string | null>(null);
 
-  // Fetch on mount and when directory changes
-  React.useEffect(() => {
-    void refresh({ directory, silent: true });
-    void loadMcpConfigs({ force: true });
-  }, [refresh, directory, loadMcpConfigs]);
-
-  // Refresh when dropdown opens
+  // No mount-level status read: reading MCP status boots the directory's
+  // whole stdio server fleet as an OpenCode side effect, and this component
+  // can stay mounted (the VS Code header mounts it at startup). The read
+  // waits for the dropdown to open.
   React.useEffect(() => {
     if (!open) return;
     void Promise.all([
