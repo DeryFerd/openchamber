@@ -2166,6 +2166,73 @@ describe("forkFromLastCompletedTurn", () => {
     expect(replyCalls).toEqual([])
     expect(selectedSessions).toEqual([])
   })
+
+  // OpenCode 2 opens turns without a user prompt too; the lookup must not
+  // treat those openers as part of the finished turn before them.
+  // SAFETY: the boundary lookup reads only role, time, and metadata; this
+  // fixture carries exactly the synthetic report fields readSubagentRun parses.
+  const subagentReport = {
+    id: "msg-subagent-report",
+    role: "synthetic",
+    sessionID: sourceSession.id,
+    time: { created: 1 },
+    metadata: { source: "subagent", childID: "child-1", state: "completed" },
+    text: "<subagent>\nchild done\n</subagent>",
+  } as Message
+  // SAFETY: the boundary lookup reads only role and time; compaction is a
+  // TURN_BOUNDARY_ROLES member, so no other Message field is dereferenced.
+  const compactionOpener = {
+    id: "msg-compaction-opener",
+    role: "compaction",
+    sessionID: sourceSession.id,
+    time: { created: 1 },
+  } as Message
+  // SAFETY: the boundary lookup reads only role and time; shell is a
+  // TURN_BOUNDARY_ROLES member, so no other Message field is dereferenced.
+  const shellOpener = {
+    id: "msg-shell-opener",
+    role: "shell",
+    sessionID: sourceSession.id,
+    time: { created: 1 },
+  } as Message
+
+  test("finds the finished reply when the running turn resumed from a background subagent", async () => {
+    const { findLastCompletedTurnMessageId } = await import("./session-actions")
+    const transcript = [message("u1", "user"), message("a1", "assistant", 2), subagentReport, message("a-live", "assistant")]
+    expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
+  })
+
+  test("finds the finished reply when the running turn was opened by a compaction", async () => {
+    const { findLastCompletedTurnMessageId } = await import("./session-actions")
+    const transcript = [message("u1", "user"), message("a1", "assistant", 2), compactionOpener, message("a-live", "assistant")]
+    expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
+  })
+
+  test("finds the finished reply when the running turn was opened by a shell run", async () => {
+    const { findLastCompletedTurnMessageId } = await import("./session-actions")
+    const transcript = [message("u1", "user"), message("a1", "assistant", 2), shellOpener, message("a-live", "assistant")]
+    expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
+  })
+
+  test("forks from the finished reply while a subagent-resumed turn streams", async () => {
+    const transcript = [message("u1", "user"), message("a1", "assistant", 2), subagentReport, message("a-live", "assistant")]
+    const source = createStore({}, {
+      session: [sourceSession],
+      message: { [sourceSession.id]: transcript },
+      session_status: { [sourceSession.id]: { type: "busy" } },
+    })
+    const { forkFromLastCompletedTurn, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+
+    await forkFromLastCompletedTurn(sourceSession.id)
+
+    // Cut at the subagent report: the finished reply is kept, the in-flight
+    // turn after it is not copied into the fork.
+    expect(replyCalls).toEqual([{
+      method: "session.fork",
+      params: { sessionID: sourceSession.id, messageID: "msg-subagent-report", directory: sourceSession.directory },
+    }])
+  })
 })
 
 describe("revertToMessage passes session directory", () => {

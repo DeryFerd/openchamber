@@ -2575,15 +2575,17 @@ export async function forkAfterMessage(sessionId: string, messageId: string): Pr
 
 /**
  * The last assistant message of the last finished turn, or null when there is
- * none. While a turn runs, everything from its prompt (the last user message)
- * on is excluded: a step inside it can already carry `time.completed` while the
- * turn keeps going, so only turns before it count as stable.
+ * none. While a turn runs, everything from the record that opened it on is
+ * excluded: that record is a turn boundary (a prompt, a compaction, a shell
+ * run, or a background subagent run), and a step inside the running turn can
+ * already carry `time.completed` while the turn keeps going, so only turns
+ * before it count as stable.
  */
 export function findLastCompletedTurnMessageId(messages: readonly Message[], turnRunning: boolean): string | null {
   let end = messages.length
   if (turnRunning) {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index].role === "user") {
+      if (isTurnBoundary(messages[index])) {
         end = index
         break
       }
