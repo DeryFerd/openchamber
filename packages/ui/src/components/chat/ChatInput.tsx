@@ -43,6 +43,7 @@ import {
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { BtwPanel } from './btw/BtwPanel';
 import { useBtwPanelState } from './btw/useBtwPanelState';
+import { findCatalogModel } from '@/lib/opencode/model';
 import { resolveBtwSelection, useBtwStore } from '@/stores/useBtwStore';
 import { wasPromotedBtwSession } from '@/lib/sessionBtwMetadata';
 import { buildBtwSyntheticTexts, preparePendingBtwSend, startBtwSession } from '@/lib/btw';
@@ -543,6 +544,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const configModelId = useConfigStore((state) => state.currentModelId);
     const currentProviderId = pinnedComposerSelection?.model?.providerId ?? configProviderId;
     const currentModelId = pinnedComposerSelection?.model?.modelId ?? configModelId;
+    const providerCatalog = useConfigStore((state) => state.providers);
     const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
     // Subscribe to both sources read by getModelMetadata so async metadata and provider updates are observed.
     useConfigStore((state) => state.modelsMetadata);
@@ -572,6 +574,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const effectiveBtwSelection = resolveBtwSelection({
         agents,
         savedAgent: btwAgentSelection,
+        isModelAvailable: React.useCallback(({ providerId, modelId }: { providerId: string; modelId: string }) => {
+            const provider = providerCatalog.find((candidate) => candidate.id === providerId);
+            return Boolean(provider && findCatalogModel(provider.models, modelId));
+        }, [providerCatalog]),
         savedModel: btwModelSelection,
         savedVariant: btwSavedVariant,
         composerModel: currentProviderId && currentModelId ? { providerId: currentProviderId, modelId: currentModelId } : null,
