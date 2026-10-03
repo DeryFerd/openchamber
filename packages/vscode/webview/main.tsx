@@ -1186,9 +1186,9 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
-  if (pathname.startsWith('/api/opencode/directory')) {
+  if (pathname === '/api/openchamber/directory') {
     const body = await extractJsonBody(input, init, method);
-    const result = await sendBridgeMessage('api:opencode/directory', { path: body.path });
+    const result = await sendBridgeMessage('api:openchamber/directory', { path: body.path });
     return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
@@ -1208,6 +1208,23 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
       const body = method === 'PUT' ? await extractJsonBody(input, init, method) : undefined;
       const bridgeMethod = quotaCredentialMatch[2]?.toUpperCase() || method;
       const data = await sendBridgeMessage('api:quota:credentials', { providerId: quotaCredentialMatch[1], method: bridgeMethod, credential: body });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  const quotaGiftResetMatch = pathname.match(/^\/api\/quota\/([^/]+)\/gift-reset\/use$/);
+  if (quotaGiftResetMatch && method === 'POST') {
+    const providerId = decodeURIComponent(quotaGiftResetMatch[1]);
+    try {
+      const body = await extractJsonBody(input, init, method);
+      const data = await sendBridgeMessage('api:quota:giftReset:use', {
+        providerId,
+        recordId: body.recordId,
+        resetType: body.resetType,
+      });
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

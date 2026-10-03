@@ -1,6 +1,5 @@
 import { readOpenCodeInfo, isSupportedOpenCodeVersion } from './compatibility.js';
 import express from 'express';
-import { createProjectIdFromPath } from '../projects/project-id.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -28,11 +27,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     getOpenCodeCompatibility,
     installOpenCodeV2,
     formatSettingsResponse,
-    readSettingsFromDisk,
     readSettingsFromDiskMigrated,
     persistSettings,
-    sanitizeProjects,
-    validateDirectoryPath,
     resolveProjectDirectory,
     getProviderSources,
     removeProviderConfig,
@@ -40,7 +36,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     refreshOpenCodeAfterConfigChange,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
-    fsPromises = fs.promises,
   } = dependencies;
 
   let authLibrary = null;
@@ -141,12 +136,15 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     const capability = getOpenCodeUpgradeCapability();
     if (!capability.supported) {
       const bundled = capability.reason === 'bundled';
+      const pinned = capability.reason === 'policy';
       return res.status(409).json({
         success: false,
         code: bundled ? 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER' : 'OPENCODE_UPGRADE_UNSUPPORTED',
         error: bundled
           ? 'OpenCode is bundled with OpenChamber Desktop and updates with the app.'
-          : 'This OpenCode runtime cannot be upgraded by OpenChamber.',
+          : pinned
+            ? 'Your administrator manages this OpenCode installation.'
+            : 'This OpenCode runtime cannot be upgraded by OpenChamber.',
       });
     }
     try {
@@ -186,9 +184,12 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       if (!currentVersion || !latestVersion) {
         return res.json({ available: null, currentVersion, latestVersion: latestVersion || null, upgrade: capability });
       }
-      // A bundled binary updates together with the desktop app, so a newer
-      // OpenCode is not something the user can act on: never announce it.
-      const available = capability.reason === 'bundled' ? false : compareVersions(latestVersion, currentVersion) > 0;
+      // A bundled binary updates together with the desktop app, and a pinned
+      // one with the administrator's rollout, so a newer OpenCode is not
+      // something the user can act on: never announce it.
+      const available = capability.reason === 'bundled' || capability.reason === 'policy'
+        ? false
+        : compareVersions(latestVersion, currentVersion) > 0;
       return res.json({
         available,
         currentVersion,
@@ -490,59 +491,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to disconnect provider:', error);
       return res.status(500).json({ error: error.message || 'Failed to disconnect provider' });
-    }
-  });
-
-  app.post('/api/opencode/directory', async (req, res) => {
-    try {
-      const requestedPath = typeof req.body?.path === 'string' ? req.body.path.trim() : '';
-      if (!requestedPath) {
-        return res.status(400).json({ error: 'Path is required' });
-      }
-
-      if (req.body?.create === true) {
-        await fsPromises.mkdir(path.resolve(requestedPath), { recursive: true });
-      }
-
-      const validated = await validateDirectoryPath(requestedPath);
-      if (!validated.ok) {
-        return res.status(400).json({ error: validated.error });
-      }
-
-      const resolvedPath = validated.directory;
-      const currentSettings = await readSettingsFromDisk();
-      const existingProjects = sanitizeProjects(currentSettings.projects) || [];
-      const existing = existingProjects.find((project) => project.path === resolvedPath) || null;
-
-      const nextProjects = existing
-        ? existingProjects
-        : [
-            ...existingProjects,
-            {
-              id: createProjectIdFromPath(resolvedPath),
-              path: resolvedPath,
-              addedAt: Date.now(),
-              lastOpenedAt: Date.now(),
-            },
-          ];
-
-      const activeProjectId = existing ? existing.id : nextProjects[nextProjects.length - 1].id;
-
-      const updated = await persistSettings({
-        projects: nextProjects,
-        activeProjectId,
-        lastDirectory: resolvedPath,
-      });
-
-      return res.json({
-        success: true,
-        restarted: false,
-        path: resolvedPath,
-        settings: updated,
-      });
-    } catch (error) {
-      console.error('Failed to update OpenCode working directory:', error);
-      return res.status(500).json({ error: error.message || 'Failed to update working directory' });
     }
   });
 

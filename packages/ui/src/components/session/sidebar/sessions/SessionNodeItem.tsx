@@ -1,4 +1,5 @@
 import { DirectoryActionIndicator } from './DirectoryActionIndicator';
+import { useLinearIssueStates } from '@/stores/useLinearIssueStateStore';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
 import React from 'react';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
@@ -33,13 +34,13 @@ import { runGuestSessionAction } from '@/lib/guests/session-action';
 import { SessionAiRenameMenuItem } from '@/components/session/SessionAiRenameMenuItem';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
-import { useSessionPermissions, useSessionFormCount } from '@/sync/sync-context';
+import { useSessionBlockingRequestCounts } from '@/sync/sync-context';
 import { usePrefetchSessionMessages, useSessionMessageRecordsForExport } from '@/sync/use-sync';
 import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from '../folders/sessionFolderDnd';
 import { useSessionRowOrderRegistry } from './sessionRowOrder';
-import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, resolveSessionPrLookupKey, resolveTooltipBranchLabel, selectFormBadgeSessionScopes, selectRowBadgeVisibilityClass } from './sessionNodeItemUtils';
+import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, resolveSessionPrLookupKey, resolveTooltipBranchLabel, selectBlockingBadgeSessionScopes, selectRowBadgeVisibilityClass, type BlockingBadgeSessionScope } from './sessionNodeItemUtils';
 import { useSessionRowMenuState } from './useSessionRowMenuState';
 import type { SessionNode } from '../types';
 import type { SessionSidebarRenderContext } from '../sessionSidebarRowModel';
@@ -50,8 +51,8 @@ import { openExternalUrl } from '@/lib/url';
 import { SessionMenuItemHint } from '../../SessionMenuItemHint';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks, type SidebarRefLink } from './SidebarRefLinks';
 import { useLinkedIssueStates, useLinkedPrVisualSummaries, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
-import { getLinkedGitHubPullRequests, getLinkedSidebarIssues, type LinkedGitHubPullRequest, type LinkedSidebarIssue } from '@/lib/linkedIssues';
-import { buildSessionIssueItems, combineSessionPrSummaries } from './sessionPrSummaries';
+import { getLinkedGitHubPullRequests, getLinkedSidebarChanges, getLinkedSidebarIssues, type LinkedGitHubPullRequest, type LinkedSidebarChange, type LinkedSidebarIssue } from '@/lib/linkedIssues';
+import { buildSessionIssueItems, combineSessionPrSummaries, findLinkedPrsWithoutState } from './sessionPrSummaries';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
@@ -132,6 +133,7 @@ export type SessionNodeItemProps = {
   onEditProject?: (projectId: string) => void;
   secondaryMeta?: SecondaryMeta | null;
   renderContext?: SessionSidebarRenderContext;
+  blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
   rowKey?: string;
   dragKey?: string;
   /**
@@ -151,10 +153,9 @@ export type SessionNodeItemProps = {
    */
   relativeTimeTick?: number;
   /**
-   * Precomputed structural key for this node. Encodes the IDs and child
-   * counts of all descendants so a reference-only change to `node` (e.g.
-   * a fresh tree rebuild) can be detected with a single string compare
-   * instead of a recursive walk per row.
+   * Precomputed structural key for this node and its badge-only scopes in
+   * flat Timeline rows. Both row memo boundaries use it to notice changes
+   * to hidden descendants without adding them to the rendered node.
    */
   nodeStructureKey: string;
   /**
@@ -177,6 +178,7 @@ const areNodeWorktreeRenderSemanticsEqual = (prev: SessionNode, next: SessionNod
 // shift by one gutter step per depth level.
 const EMPTY_LINKED_PULL_REQUESTS: readonly LinkedGitHubPullRequest[] = [];
 const EMPTY_LINKED_SIDEBAR_ISSUES: readonly LinkedSidebarIssue[] = [];
+const EMPTY_LINKED_SIDEBAR_CHANGES: readonly LinkedSidebarChange[] = [];
 
 /** One PR or issue a session row lists in its badge and tooltips. */
 type SessionRefLine = SidebarRefLink & {
@@ -333,6 +335,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     alwaysShowActions,
     secondaryMeta,
     renderContext = 'project',
+    blockingBadgeSessionScopes: timelineBadgeSessionScopes,
     rowKey,
     dragKey,
     children,
@@ -431,6 +434,16 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     () => combineSessionPrSummaries(branchPrSummary, linkedPrSummaries),
     [branchPrSummary, linkedPrSummaries],
   );
+  // Merge and pull requests on other services have no state here yet: they
+  // follow the GitHub ones, by identifier, uncoloured.
+  const linkedChanges = React.useMemo(
+    () => (isVSCode ? EMPTY_LINKED_SIDEBAR_CHANGES : getLinkedSidebarChanges(session)),
+    [isVSCode, session],
+  );
+  const linkedPrsWithoutState = React.useMemo(
+    () => findLinkedPrsWithoutState(linkedPullRequests, prSummaries),
+    [linkedPullRequests, prSummaries],
+  );
   // The branch icon speaks for the branch, not for PRs linked from elsewhere.
   const branchPrIconColor = branchPrSummary ? `var(--pr-${branchPrSummary.visualState})` : undefined;
   // The project tree already shows the branch on the worktree sub-header, so
@@ -447,10 +460,15 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     [linkedIssues],
   );
   const linkedIssueStates = useLinkedIssueStates(linkedGitHubIssueRefs);
+  const linkedLinearIdentifiers = React.useMemo(
+    () => linkedIssues.flatMap((issue) => (issue.source === 'linear' ? [issue.identifier] : [])),
+    [linkedIssues],
+  );
+  const linkedLinearStates = useLinearIssueStates(linkedLinearIdentifiers);
   // What the row's badge and tooltips list: its PRs, or else its issues.
   const refLines = React.useMemo((): SessionRefLine[] => {
-    if (prSummaries.length > 0) {
-      return prSummaries.map((summary) => {
+    if (prSummaries.length > 0 || linkedPrsWithoutState.length > 0 || linkedChanges.length > 0) {
+      const githubLines = prSummaries.map((summary): SessionRefLine => {
         const label = getPrStatusLabel(summary, t);
         return {
           key: `${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`,
@@ -462,17 +480,34 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           text: label ? `#${summary.number} · ${label}` : `#${summary.number}`,
         };
       });
+      const pendingLines = linkedPrsWithoutState.map((link): SessionRefLine => ({
+        key: `${link.owner}/${link.repo}#${link.number}`,
+        icon: 'git-pull-request',
+        label: `#${link.number}`,
+        url: link.url,
+        title: link.title,
+        text: `#${link.number}`,
+      }));
+      const otherLines = linkedChanges.map((change): SessionRefLine => ({
+        key: change.key,
+        icon: 'git-pull-request',
+        label: change.identifier,
+        url: change.url,
+        title: change.title,
+        text: change.identifier,
+      }));
+      return [...githubLines, ...pendingLines, ...otherLines];
     }
-    return buildSessionIssueItems(linkedIssues, linkedIssueStates).map((item) => ({
+    return buildSessionIssueItems(linkedIssues, linkedIssueStates, linkedLinearStates).map((item) => ({
       key: item.key,
       icon: item.icon,
       label: item.label,
       color: item.color ?? undefined,
       url: item.url,
       title: item.title,
-      text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.label,
+      text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.statusText ? `${item.label} · ${item.statusText}` : item.label,
     }));
-  }, [linkedIssueStates, linkedIssues, prSummaries, t]);
+  }, [linkedChanges, linkedIssueStates, linkedIssues, linkedLinearStates, linkedPrsWithoutState, prSummaries, t]);
   const primaryRef = refLines[0] ?? null;
   const moreRefCount = Math.max(0, refLines.length - 1);
   const refBadgeLabel = refLines.map((line) => line.text).join(', ');
@@ -548,7 +583,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const [worktreeTargetsLoadFailed, setWorktreeTargetsLoadFailed] = React.useState(false);
   const worktreeSubmenuOpenRef = React.useRef(false);
   const worktreeLoadSequenceRef = React.useRef(0);
-  const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined, { bootstrap: false });
   const sessionGoal = getSessionGoal(resolvedSession);
   const isInWork = canTrackWork && isSessionInWork(resolvedSession);
   const showDoneHint = isInWork && !isStreaming && isDoneSuggested(resolvedSession);
@@ -580,11 +614,14 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // expand the other. Matches the format of menuInstanceKey.
   const expansionKey = legacyContextKey;
   const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
-  const formBadgeSessionScopes = React.useMemo(
-    () => selectFormBadgeSessionScopes(node, isExpanded, sessionDirectory),
-    [isExpanded, node, sessionDirectory],
+  const blockingBadgeSessionScopes = React.useMemo(
+    () => timelineBadgeSessionScopes ?? selectBlockingBadgeSessionScopes(node, isExpanded, sessionDirectory),
+    [isExpanded, node, sessionDirectory, timelineBadgeSessionScopes],
   );
-  const pendingFormCount = useSessionFormCount(formBadgeSessionScopes);
+  const {
+    permissionCount: pendingPermissionCount,
+    formCount: pendingFormCount,
+  } = useSessionBlockingRequestCounts(blockingBadgeSessionScopes);
   const isSubtaskSession = Boolean(resolvedSession.parentID);
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
@@ -875,7 +912,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     );
   }
 
-  const pendingPermissionCount = sessionPermissions.length;
   const pendingFormLabel = pendingFormCount === 1
     ? t('sessions.sidebar.session.status.questionPendingSingle')
     : t('sessions.sidebar.session.status.questionPendingMany', { count: pendingFormCount });

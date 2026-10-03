@@ -6,6 +6,7 @@ import { usePrefetchSessionMessages } from '@/sync/use-sync';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { useOpenPrSummarySync } from '@/hooks/useOpenPrSummarySync';
+import { useLinearIssueStateSync } from '@/hooks/useLinearIssueStateSync';
 import { getLinkedGitHubPullRequests, getLinkedSidebarIssues } from '@/lib/linkedIssues';
 import type { GitHubPullRequestRef } from '@/lib/api/types';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -43,6 +44,7 @@ import { useSidebarSpaces, type SpaceMark } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
+import { selectBlockingBadgeSessionScopes } from '../sessions/sessionNodeItemUtils';
 
 const PR_NO_PR_RETRY_MS = 5 * 60_000;
 
@@ -321,7 +323,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     createFolder,
     addSessionToFolder,
   });
-  const { github } = useRuntimeAPIs();
+  const { github, linear } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const ensureEntry = useGitHubPrStatusStore((state) => state.ensureEntry);
@@ -376,6 +378,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     if (!timelineMode) return EMPTY_TIMELINE_ITEMS;
     const rootIds = new Set(collection.rootSessions.map((session) => session.id));
     const sessions = collection.orderedSessions.filter((session) => rootIds.has(session.id) && !session.time?.archived);
+    const badgeScopesBySessionId = new Map<string, ReturnType<typeof selectBlockingBadgeSessionScopes>>();
     const locations = resolveSidebarSessionLocations({
       sessions,
       projects: topology.projects,
@@ -387,18 +390,20 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       rootBranchByProjectId: topology.projectRootBranches,
       hideBranchMatchingProjectLabel: false,
     });
-    return deriveTimelineActivityItems({
+    const items = deriveTimelineActivityItems({
       sessions,
       getSessionLocation: (sessionId) => locations.get(sessionId) ?? null,
-      // Timeline rows never expand, and their archive/delete actions resolve
-      // descendants from the global cache at action time.
-      getSessionNode: (session) => ({
-        ...buildActiveSessionNode(collection.childrenMap, session),
-        children: [],
-        worktree: locations.get(session.id)?.worktree ?? null,
-      }),
+      // Timeline rows never expand. Keep descendants for the badges before
+      // flattening the rendered node; archive/delete still resolve them at action time.
+      getSessionNode: (session) => {
+        const tree = buildActiveSessionNode(collection.childrenMap, session);
+        const location = locations.get(session.id);
+        badgeScopesBySessionId.set(session.id, selectBlockingBadgeSessionScopes(tree, false, location?.groupDirectory ?? session.directory ?? null));
+        return { ...tree, children: [], worktree: location?.worktree ?? null };
+      },
       query: view.hasSessionSearchQuery ? view.normalizedSessionSearchQuery : '',
     });
+    return items.map((item) => ({ ...item, blockingBadgeSessionScopes: badgeScopesBySessionId.get(item.node.session.id) }));
   }, [collection.childrenMap, collection.orderedSessions, collection.rootSessions, ownership.bySessionId, spaceLabelById, timelineMode, topology.availableWorktreesByProject, topology.gitBranches, topology.projectRootBranches, topology.projects, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
 
   // Sessions in work: top-level, unarchived project sessions (Chats are plain
@@ -427,8 +432,12 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     // Timeline rows never expand; the Projects view keeps subsessions
     // reachable, the way Recent does, and searches the whole tree: these
     // sessions are nowhere else in the sidebar.
+    const badgeScopesBySessionId = new Map<string, ReturnType<typeof selectBlockingBadgeSessionScopes>>();
     const nodes = new Map(workSessions.map((session) => {
       const tree = buildActiveSessionNode(collection.childrenMap, session);
+      if (timelineMode) {
+        badgeScopesBySessionId.set(session.id, selectBlockingBadgeSessionScopes(tree, false, locations.get(session.id)?.groupDirectory ?? session.directory ?? null));
+      }
       const node: SessionNode = {
         ...tree,
         children: timelineMode ? [] : tree.children,
@@ -443,12 +452,15 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         return node ? sessionTreeMatchesSidebarQuery(node, query) : false;
       })
       : [...workSessions];
-    return deriveTimelineActivityItems({
+    const items = deriveTimelineActivityItems({
       sessions: listed,
       getSessionLocation: (sessionId) => locations.get(sessionId) ?? null,
       getSessionNode: (session) => nodes.get(session.id) ?? buildActiveSessionNode(collection.childrenMap, session),
       query: '',
     });
+    return timelineMode
+      ? items.map((item) => ({ ...item, blockingBadgeSessionScopes: badgeScopesBySessionId.get(item.node.session.id) }))
+      : items;
   }, [collection.childrenMap, ownership.bySessionId, spaceLabelById, timelineMode, topology.availableWorktreesByProject, topology.gitBranches, topology.projectRootBranches, topology.projects, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery, workSessions]);
   // Worktree branches whose PR badge is on screen in the current mode:
   // Timeline rows there; expanded project groups plus Recent rows in the
@@ -460,6 +472,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     // branch.
     const linkedRefs = new Map<string, GitHubPullRequestRef>();
     const linkedIssueRefs = new Map<string, GitHubPullRequestRef>();
+    // Linear issues linked to the sessions on screen; their state comes from
+    // Linear, on its own cadence below.
+    const linearIdentifiers = new Set<string>();
     const addTarget = (directory: string | null, branch: string | null | undefined) => {
       const trimmed = branch?.trim();
       if (directory && trimmed) targets.set(getGitHubPrStatusKey(directory, trimmed), { directory, branch: trimmed });
@@ -474,6 +489,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         for (const issue of getLinkedSidebarIssues(node.session)) {
           if (issue.source === 'github') {
             linkedIssueRefs.set(`${issue.owner.toLowerCase()}/${issue.repo.toLowerCase()}#${issue.number}`, { owner: issue.owner, repo: issue.repo, number: issue.number });
+          } else if (issue.source === 'linear') {
+            linearIdentifiers.add(issue.identifier.toUpperCase());
           }
         }
       }
@@ -482,7 +499,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     workItems.forEach((item) => addNode(item.node));
     if (timelineMode) {
       timelineItems.forEach((item) => addNode(item.node));
-      return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()] };
+      return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()], linearIdentifiers: [...linearIdentifiers] };
     }
     recentActivitySections.forEach((section) => section.items.forEach((item) => addNode(item.node)));
     projectSections.forEach((section) => {
@@ -497,7 +514,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         addTarget(directory, group.branch?.trim() || topology.gitBranches.get(directory || ''));
       });
     });
-    return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()] };
+    return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()], linearIdentifiers: [...linearIdentifiers] };
   }, [projectSections, projectView.collapsedProjects, recentActivitySections, timelineItems, timelineMode, topology.gitBranches, topology.isVSCode, workItems]);
   const shownPrTargets = shownPrs.targets;
   const shownPrKeys = React.useMemo(() => [...shownPrTargets.keys()], [shownPrTargets]);
@@ -527,6 +544,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     if (targets.size) void refreshTargets([...targets.values()], { silent: true, markInitialResolved: true });
   }, [ensureEntry, github, githubAuthChecked, githubConnected, refreshTargets, setParams, shownPrTargets]);
   useOpenPrSummarySync(shownPrKeys, shownPrs.linkedRefs, shownPrs.linkedIssueRefs, github, githubConnected);
+  useLinearIssueStateSync(shownPrs.linearIdentifiers, linear);
 
   const { groupStatusByKey, bootstrapSnapshot } = useSidebarGroupStatus({
     childStores,

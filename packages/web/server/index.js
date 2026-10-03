@@ -25,7 +25,7 @@ import {
   isNetworkExposedBindHost,
   isUnsafeUnauthenticatedLanAllowed,
 } from './lib/security/bind-host.js';
-import { isNetworkAccessBlocked, NETWORK_ACCESS_BLOCKED_ERROR } from './lib/enterprise-mode.js';
+import { isNetworkAccessBlocked, NETWORK_ACCESS_BLOCKED_ERROR, readEnterprisePolicy } from './lib/enterprise-mode.js';
 import {
   TUNNEL_MODE_MANAGED_LOCAL,
   TUNNEL_MODE_MANAGED_REMOTE,
@@ -145,6 +145,7 @@ import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
+import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
 import { createFileOpenRequester } from './lib/openchamber-control/file-open.js';
 import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
 
@@ -272,6 +273,7 @@ const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
   path,
   processLike: process,
   realpathSync: fs.realpathSync,
+  readdirSync: fs.readdirSync,
   tunnelBootstrapTtlDefaultMs: TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS,
   tunnelBootstrapTtlMinMs: TUNNEL_BOOTSTRAP_TTL_MIN_MS,
   tunnelBootstrapTtlMaxMs: TUNNEL_BOOTSTRAP_TTL_MAX_MS,
@@ -799,7 +801,11 @@ const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.schedul
 // Plugin-registered providers exist only inside the running OpenCode process.
 // Small-model callers resolve them through this connection; without it they
 // stay on the file-based resolution and plugin models remain unreachable.
-configureOpenCodeRuntimeProviders({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
+configureOpenCodeRuntimeProviders({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getDefaultDirectory: () => openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(),
+});
 
 const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
   process.env.OPENCODE_API_PREFIX || process.env.OPENCHAMBER_API_PREFIX || ''
@@ -979,6 +985,12 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   // reference here would read it before it exists.
   resolveProjectId: (directory) => resolveMemoryProjectId(directory),
   isAgentMemoryEnabled,
+  // The plugin carrying the tool exists only in an OpenCode we launched.
+  isSessionLinkingAvailable: async () => {
+    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
+    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    return settings?.agentControlToolEnabled !== false;
+  },
   readSessionMetadata: readStoredSessionMetadata,
   // Pins and the delivered-signature cursor are read from and written to
   // OpenChamber's own store; nothing here talks to OpenCode any more.
@@ -1386,7 +1398,12 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
         directories.push(project.path);
       }
     }
-    return [...new Set(directories)];
+    // A deleted project would fail every read scoped to it, and the first entry
+    // also scopes server-side reads that have no directory of their own.
+    const existing = await Promise.all([...new Set(directories)].map(async (directory) => (
+      (await fs.promises.stat(directory).catch(() => null))?.isDirectory() ? directory : null
+    )));
+    return existing.filter(Boolean);
   },
   // A managed restart can move OpenCode to a NEW port (the old one may stay
   // occupied if killProcessOnPort/waitForPortRelease didn't free it in time,
@@ -1431,6 +1448,7 @@ configureOpenCodeCredentials(openCodeCredentialSource({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getLaunchEnvironment: () => openCodeLifecycleRuntime.getManagedOpenCodeProcessEnv(),
+  getDefaultDirectory: () => openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(),
 }));
 
 const getOpenCodeCompatibility = async () => {
@@ -1442,7 +1460,9 @@ const getOpenCodeCompatibility = async () => {
   const binary = ensureOpencodeCliEnv();
   const installation = isBundledOpenCodeCliPath(binary) ? 'bundled' : 'managed';
   const version = await readOpenCodeCliVersion(resolveManagedOpenCodeLaunchSpec(binary)).catch(() => null);
-  return describeOpenCodeCompatibility(version, installation, supportsOpenCodeV2Install());
+  // A CLI pinned by the administrator is theirs to replace, never ours.
+  const pinnedByPolicy = Boolean(readEnterprisePolicy().opencodeBinary);
+  return describeOpenCodeCompatibility(version, installation, supportsOpenCodeV2Install() && !pinnedByPolicy, binary || null);
 };
 
 const getOpenCodeUpgradeCapability = () => {
@@ -1454,6 +1474,7 @@ const getOpenCodeUpgradeCapability = () => {
     hasManagedProcess: Boolean(openCodeProcess),
     activeBinary,
     isBundledBinary: isBundledOpenCodeCliPath,
+    pinnedByPolicy: Boolean(readEnterprisePolicy().opencodeBinary),
   });
 };
 
@@ -1687,6 +1708,10 @@ const openChamberControlService = createOpenChamberControlService({
     isAgentMemoryEnabled,
     resolveProjectId: resolveMemoryProjectId,
   }),
+  sessionLinks: createSessionLinker({
+    updateMetadata: updateSessionMetadataWith,
+    createError: (message, status) => new OpenChamberControlError(message, status),
+  }),
 });
 
 const ensureGlobalWatcherStarted = async () => {
@@ -1722,9 +1747,6 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
 const killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
 const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);
 
-const fetchAgentsSnapshot = (...args) => serverUtilsRuntime.fetchAgentsSnapshot(...args);
-const fetchProvidersSnapshot = (...args) => serverUtilsRuntime.fetchProvidersSnapshot(...args);
-const fetchModelsSnapshot = (...args) => serverUtilsRuntime.fetchModelsSnapshot(...args);
 const setupProxy = (...args) => serverUtilsRuntime.setupProxy(...args);
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,

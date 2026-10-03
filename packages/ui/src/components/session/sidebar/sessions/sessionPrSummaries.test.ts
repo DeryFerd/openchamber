@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 import type { LinkedSidebarIssue } from '@/lib/linkedIssues';
-import { buildSessionIssueItems, combineSessionPrSummaries, getPrStatusLabelKey } from './sessionPrSummaries';
+import { buildSessionIssueItems, combineSessionPrSummaries, findLinkedPrsWithoutState, getPrStatusLabelKey } from './sessionPrSummaries';
 
 const summary = (number: number, visualState: string, overrides: Partial<PrVisualSummary> = {}): PrVisualSummary => ({
   number,
@@ -34,6 +34,30 @@ describe('combineSessionPrSummaries', () => {
   test('keeps PRs with the same number from different repositories apart', () => {
     const combined = combineSessionPrSummaries(null, [summary(7, 'open'), summary(7, 'open', { repo: { owner: 'acme', repo: 'web' } })]);
     expect(combined).toHaveLength(2);
+  });
+});
+
+describe('findLinkedPrsWithoutState', () => {
+  test('keeps linked PRs whose state has not arrived, matching repositories case-insensitively', () => {
+    const link = (number: number, owner = 'acme') => ({ owner, repo: 'app', number, url: `https://github.com/${owner}/app/pull/${number}`, title: `PR ${number}` });
+    expect(findLinkedPrsWithoutState([link(7, 'Acme'), link(8)], [summary(7, 'open')]).map((entry) => entry.number)).toEqual([8]);
+    expect(findLinkedPrsWithoutState([link(7)], [])).toHaveLength(1);
+  });
+});
+
+describe('linked Linear issues', () => {
+  test('take the colour of their state type and show its team name', () => {
+    const linear = (identifier: string): LinkedSidebarIssue => ({ source: 'linear', key: `linear:${identifier}`, identifier, url: `https://linear.app/x/issue/${identifier}`, title: 'Old title' });
+    const items = buildSessionIssueItems([linear('ENG-1'), linear('ENG-2'), linear('ENG-3')], [], [
+      { identifier: 'ENG-1', title: 'Shipped', state: { name: 'Done', type: 'completed' } },
+      null,
+      { identifier: 'ENG-3', title: 'Working', state: { name: 'In Progress', type: 'started' } },
+    ]);
+    expect(items.map((item) => [item.label, item.color, item.statusText, item.title])).toEqual([
+      ['ENG-3', 'var(--pr-open)', 'In Progress', 'Working'],
+      ['ENG-2', null, null, 'Old title'],
+      ['ENG-1', 'var(--pr-merged)', 'Done', 'Shipped'],
+    ]);
   });
 });
 

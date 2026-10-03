@@ -13,6 +13,7 @@ import {
   checkoutCommit,
   cherryPick,
   createWorktree,
+  fetch as gitFetch,
   getWorktreeBootstrapStatus,
   getBranches,
   getUnpushedBranchCounts,
@@ -47,6 +48,10 @@ import {
   validateWorktreeCreate,
   parseBranchCreationSource,
   getRangeFiles,
+  continueMerge,
+  continueRebase,
+  merge,
+  rebase,
   push,
 } from './service.js';
 
@@ -1784,6 +1789,160 @@ describe('createWorktree from a forked GitHub PR', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Option-like remote names
+// ---------------------------------------------------------------------------
+
+describe('git remote arguments with option-like names', () => {
+  const OPTION_LIKE_REMOTE = '--mirror';
+
+  const withDataHome = async (test) => {
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    try {
+      await test(dataHome);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  };
+
+  const addOptionLikeRemote = (repository, remoteUrl, { fetch = true } = {}) => {
+    runGit(repository, ['remote', 'add', '--', OPTION_LIKE_REMOTE, remoteUrl]);
+    if (fetch) {
+      runGit(repository, ['fetch', '--', OPTION_LIKE_REMOTE]);
+    }
+  };
+
+  it('creates a worktree with a remote whose name looks like an option', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { remote, repository } = createRepositoryWithRemote();
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/option-like-remote',
+        worktreeName: 'option-like-remote',
+        ensureRemoteName: OPTION_LIKE_REMOTE,
+        ensureRemoteUrl: remote,
+      });
+
+      expect(created.branch).toBe('openchamber/option-like-remote');
+      expect(runGit(repository, ['remote', 'get-url', '--', OPTION_LIKE_REMOTE]).trim()).toBe(remote);
+    });
+  }, 30_000);
+
+  it('fetches from an option-like remote through the raw fallback', async () => {
+    if (!canRunGit()) return;
+
+    const { remote, repository } = createRepositoryWithRemote();
+    addOptionLikeRemote(repository, remote);
+
+    await gitFetch(repository, { remote: OPTION_LIKE_REMOTE });
+
+    const expected = runGit(remote, ['rev-parse', 'react']).trim();
+    expect(runGit(repository, ['rev-parse', `refs/remotes/${OPTION_LIKE_REMOTE}/react`]).trim()).toBe(expected);
+  }, 30_000);
+
+  it('validates a start ref and upstream on an option-like remote', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { remote, repository } = createRepositoryWithRemote();
+      fs.writeFileSync(path.join(repository, 'OPTION.md'), '# option\n');
+      runGit(repository, ['add', 'OPTION.md']);
+      runGit(repository, ['commit', '-m', 'option-like branch']);
+      runGit(repository, ['push', '--', remote, 'HEAD:refs/heads/feature/option-like']);
+      addOptionLikeRemote(repository, remote);
+
+      const validation = await validateWorktreeCreate(repository, {
+        mode: 'new',
+        branchName: 'feature/option-like-worktree',
+        worktreeName: 'option-like-worktree',
+        startRef: `remotes/${OPTION_LIKE_REMOTE}/feature/option-like`,
+        setUpstream: true,
+        upstreamRemote: OPTION_LIKE_REMOTE,
+        upstreamBranch: 'feature/option-like',
+      });
+
+      expect(validation.errors).toEqual([]);
+      expect(validation.ok).toBe(true);
+    });
+  }, 30_000);
+
+  it('creates a worktree from an option-like remote start ref', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { remote, repository } = createRepositoryWithRemote();
+      fs.writeFileSync(path.join(repository, 'OPTION.md'), '# option\n');
+      runGit(repository, ['add', 'OPTION.md']);
+      runGit(repository, ['commit', '-m', 'option-like start ref']);
+      const sha = runGit(repository, ['rev-parse', 'HEAD']).trim();
+      runGit(repository, ['push', '--', remote, 'HEAD:refs/heads/feature/option-like']);
+      addOptionLikeRemote(repository, remote, { fetch: false });
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/option-like-start-ref',
+        worktreeName: 'option-like-start-ref',
+        startRef: `remotes/${OPTION_LIKE_REMOTE}/feature/option-like`,
+      });
+
+      expect(created.branch).toBe('openchamber/option-like-start-ref');
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(sha);
+      await expect.poll(
+        () => getWorktreeBootstrapStatus(created.path).then((status) => status.status === 'ready' || status.status === 'failed'),
+        { timeout: 5_000 }
+      ).toBe(true);
+    });
+  }, 30_000);
+
+  it('lists branches without treating an option-like remote as an option', async () => {
+    if (!canRunGit()) return;
+
+    const { remote, repository } = createRepositoryWithRemote();
+    addOptionLikeRemote(repository, remote);
+    const head = runGit(repository, ['rev-parse', 'HEAD']).trim();
+    runGit(repository, ['update-ref', `refs/remotes/${OPTION_LIKE_REMOTE}/gone`, head]);
+
+    const branches = await getBranches(repository);
+
+    expect(branches.all).toContain(`remotes/${OPTION_LIKE_REMOTE}/react`);
+    expect(branches.all).not.toContain(`remotes/${OPTION_LIKE_REMOTE}/gone`);
+    expect(branches.defaultBranches[OPTION_LIKE_REMOTE]).toBe('react');
+  }, 30_000);
+
+  it('does not interpret an option-like ensureRemoteUrl as a git option when validating', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { repository } = createRepositoryWithRemote();
+      const markerPath = path.join(createTempDir(), 'upload-pack-ran.marker');
+      const scriptPath = path.join(createTempDir(), 'upload-pack-probe.sh');
+      fs.writeFileSync(scriptPath, `#!/bin/sh\ntouch ${JSON.stringify(markerPath)}\nexit 1\n`);
+      fs.chmodSync(scriptPath, 0o755);
+
+      const validation = await validateWorktreeCreate(repository, {
+        mode: 'existing',
+        branchName: 'feature/login-wt',
+        worktreeName: 'feature-login-wt',
+        existingBranch: 'remotes/pr-alice/feature/login',
+        ensureRemoteName: 'pr-alice',
+        ensureRemoteUrl: `--upload-pack=${scriptPath}`,
+      });
+
+      expect(fs.existsSync(markerPath)).toBe(false);
+      expect(validation.ok).toBe(false);
+    });
+  }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
 // removeWorktree
 // ---------------------------------------------------------------------------
 
@@ -2184,6 +2343,98 @@ describe('cherryPick', () => {
   it('throws for an invalid/nonexistent hash', async () => {
     const { tmpDir } = await createTempRepo();
     await expect(cherryPick(tmpDir, 'deadbeef00000000')).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// continueRebase / continueMerge
+// ---------------------------------------------------------------------------
+
+describe.runIf(canRunGit())('continuing a conflicted rebase or merge', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /** `feature` and `main` both change file.txt; `main` is checked out. */
+  async function createConflictingBranches() {
+    const { tmpDir, git } = await createTempRepo();
+    const filePath = path.join(tmpDir, 'file.txt');
+    await fs.promises.writeFile(filePath, 'base\n', 'utf8');
+    await git.add('file.txt');
+    await git.commit('Initial commit');
+
+    await git.checkoutBranch('feature', 'HEAD');
+    await fs.promises.writeFile(filePath, 'feature\n', 'utf8');
+    await git.add('file.txt');
+    await git.commit('Change file in feature');
+
+    await git.checkout('main');
+    await fs.promises.writeFile(filePath, 'main\n', 'utf8');
+    await git.add('file.txt');
+    await git.commit('Change file in main');
+
+    // An editor that fails and inherited variables simple-git refuses in an
+    // explicit env. Continuing must neither open an editor nor trip that check.
+    vi.stubEnv('GIT_EDITOR', 'false');
+    vi.stubEnv('PAGER', 'less');
+    vi.stubEnv('GIT_ASKPASS', 'false');
+
+    return { tmpDir, git, filePath };
+  }
+
+  it('finishes a rebase after the conflict is resolved', async () => {
+    const { tmpDir, git, filePath } = await createConflictingBranches();
+    await git.checkout('feature');
+    expect(await rebase(tmpDir, { onto: 'main' })).toMatchObject({ success: false, conflict: true });
+
+    await fs.promises.writeFile(filePath, 'resolved\n', 'utf8');
+    await git.add('file.txt');
+
+    expect(await continueRebase(tmpDir)).toEqual({ success: true, conflict: false });
+    const status = await getStatus(tmpDir);
+    expect(status.rebaseInProgress).toBeFalsy();
+    expect(status.current).toBe('feature');
+    expect((await git.log()).latest?.message).toBe('Change file in feature');
+  });
+
+  it('reports files that are still conflicted when continuing a rebase', async () => {
+    const { tmpDir, git } = await createConflictingBranches();
+    await git.checkout('feature');
+    await rebase(tmpDir, { onto: 'main' });
+
+    expect(await continueRebase(tmpDir)).toEqual({ success: false, conflict: true, conflictFiles: ['file.txt'] });
+  });
+
+  it('reports a conflict in the next commit after skipping an emptied one', async () => {
+    const { tmpDir, git, filePath } = await createConflictingBranches();
+    // The apply backend stops with "No changes" instead of dropping the commit.
+    await git.addConfig('rebase.backend', 'apply');
+    await git.checkout('feature');
+    await fs.promises.writeFile(filePath, 'feature again\n', 'utf8');
+    await git.add('file.txt');
+    await git.commit('Change file in feature again');
+    await rebase(tmpDir, { onto: 'main' });
+
+    // Resolving to main's content leaves nothing to commit, so the first
+    // commit is skipped and applying the second one conflicts.
+    await fs.promises.writeFile(filePath, 'main\n', 'utf8');
+    await git.add('file.txt');
+
+    expect(await continueRebase(tmpDir)).toEqual({ success: false, conflict: true, conflictFiles: ['file.txt'] });
+    expect((await getStatus(tmpDir)).rebaseInProgress).toBeTruthy();
+  });
+
+  it('finishes a merge after the conflict is resolved', async () => {
+    const { tmpDir, git, filePath } = await createConflictingBranches();
+    expect(await merge(tmpDir, { branch: 'feature' })).toMatchObject({ success: false, conflict: true });
+
+    await fs.promises.writeFile(filePath, 'resolved\n', 'utf8');
+    await git.add('file.txt');
+
+    expect(await continueMerge(tmpDir)).toEqual({ success: true, conflict: false });
+    const status = await getStatus(tmpDir);
+    expect(status.mergeInProgress).toBeFalsy();
+    expect((await git.log()).latest?.message).toBe("Merge branch 'feature'");
   });
 });
 
