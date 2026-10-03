@@ -2582,6 +2582,22 @@ export async function forkAfterMessage(sessionId: string, messageId: string): Pr
 }
 
 /**
+ * Whether the boundary at `index` opened a turn rather than arriving inside one.
+ * OpenCode steers subagent reports, compactions and prompts typed during a run
+ * into the turn that is still going, right after a step that ended on tool
+ * calls. A boundary opens a turn only when the assistant step before it finished
+ * the previous turn (or there is none).
+ */
+const opensTurn = (messages: readonly Message[], index: number): boolean => {
+  for (let before = index - 1; before >= 0; before -= 1) {
+    const message = messages[before]
+    if (message.role !== "assistant") continue
+    return message.time.completed !== undefined && message.finish !== "tool-calls"
+  }
+  return true
+}
+
+/**
  * The last assistant message of the last finished turn, or null when there is
  * none. While a turn runs, everything from the record that opened it on is
  * excluded: that record is a turn boundary (a prompt, a compaction, a shell
@@ -2593,7 +2609,7 @@ export function findLastCompletedTurnMessageId(messages: readonly Message[], tur
   let end = messages.length
   if (turnRunning) {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (isTurnBoundary(messages[index])) {
+      if (isTurnBoundary(messages[index]) && opensTurn(messages, index)) {
         end = index
         break
       }

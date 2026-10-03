@@ -2110,9 +2110,9 @@ describe("forkFromLastCompletedTurn", () => {
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     time: { created: 1, updated: 1 },
   }
-  // SAFETY: the turn lookup reads only id, role, and time.completed.
-  const message = (id: string, role: "user" | "assistant", completed?: number) =>
-    ({ id, role, sessionID: sourceSession.id, time: completed === undefined ? { created: 1 } : { created: 1, completed } }) as Message
+  // SAFETY: the turn lookup reads only id, role, time.completed, and finish.
+  const message = (id: string, role: "user" | "assistant", completed?: number, finish?: "stop" | "tool-calls") =>
+    ({ id, role, sessionID: sourceSession.id, finish, time: completed === undefined ? { created: 1 } : { created: 1, completed } }) as Message
 
   beforeEach(() => {
     replyCalls.length = 0
@@ -2211,6 +2211,47 @@ describe("forkFromLastCompletedTurn", () => {
   test("finds the finished reply when the running turn was opened by a shell run", async () => {
     const { findLastCompletedTurnMessageId } = await import("./session-actions")
     const transcript = [message("u1", "user"), message("a1", "assistant", 2), shellOpener, message("a-live", "assistant")]
+    expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
+  })
+
+  // OpenCode steers these into a turn that is still running: they arrive right
+  // after a step that ended on tool calls, so they do not open a new turn.
+  test("does not treat a report steered into the running turn as its opener", async () => {
+    const { findLastCompletedTurnMessageId } = await import("./session-actions")
+    const transcript = [
+      message("u1", "user"),
+      message("a1", "assistant", 2, "stop"),
+      message("u2", "user"),
+      message("a2", "assistant", 3, "tool-calls"),
+      subagentReport,
+      message("a-live", "assistant"),
+    ]
+    expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
+  })
+
+  test("does not treat a compaction inside the running turn as its opener", async () => {
+    const { findLastCompletedTurnMessageId } = await import("./session-actions")
+    const transcript = [
+      message("u1", "user"),
+      message("a1", "assistant", 2, "stop"),
+      message("u2", "user"),
+      message("a2", "assistant", 3, "tool-calls"),
+      compactionOpener,
+      message("a-live", "assistant"),
+    ]
+    expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
+  })
+
+  test("does not treat a prompt typed during the running turn as its opener", async () => {
+    const { findLastCompletedTurnMessageId } = await import("./session-actions")
+    const transcript = [
+      message("u1", "user"),
+      message("a1", "assistant", 2, "stop"),
+      message("u2", "user"),
+      message("a2", "assistant", 3, "tool-calls"),
+      message("u3", "user"),
+      message("a-live", "assistant"),
+    ]
     expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
   })
 
