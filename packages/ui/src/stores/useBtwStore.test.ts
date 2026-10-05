@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { resolveBtwSelection, useBtwStore } from './useBtwStore';
+import { btwModelAvailability, resolveBtwSelection, useBtwStore } from './useBtwStore';
 import { useSelectionStore } from '@/sync/selection-store';
 
 const composerModel = { providerId: 'openai', modelId: 'gpt-5.6-terra' };
@@ -157,5 +157,38 @@ describe('resolveBtwSelection with a live-catalog check', () => {
     expect(selection.agent).toBe('plan');
     expect(selection.model).toEqual(COMPOSER);
     expect(selection.variant).toBe(null);
+  });
+});
+
+describe('btwModelAvailability', () => {
+  const catalog = [{ id: 'omniroute', models: [{ id: 'orchestrator', modelID: 'orchestrator' }] }];
+  const AUTO = { providerId: 'openchamber', modelId: 'auto' };
+
+  test('offers no check while the catalog is empty, so the saved model wins', () => {
+    expect(btwModelAvailability([], true)).toBeUndefined();
+  });
+
+  test('accepts catalog models and rejects models the catalog no longer has', () => {
+    const isAvailable = btwModelAvailability(catalog, false);
+    expect(isAvailable?.(COMPOSER)).toBe(true);
+    expect(isAvailable?.(SAVED_DEAD)).toBe(false);
+  });
+
+  test('keeps a saved Auto while routing is ready, though Auto is never in the catalog', () => {
+    const selection = resolveBtwSelection({
+      agents: AGENTS,
+      savedAgent: 'plan',
+      savedModel: AUTO,
+      savedVariant: null,
+      composerModel: COMPOSER,
+      composerVariant: 'high',
+      isModelAvailable: btwModelAvailability(catalog, true),
+    });
+    expect(selection.model).toEqual(AUTO);
+    expect(selection.variant).toBe(null);
+  });
+
+  test('drops a saved Auto when routing cannot honour it', () => {
+    expect(btwModelAvailability(catalog, false)?.(AUTO)).toBe(false);
   });
 });

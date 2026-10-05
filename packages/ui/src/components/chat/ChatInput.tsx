@@ -43,8 +43,7 @@ import {
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { BtwPanel } from './btw/BtwPanel';
 import { useBtwPanelState } from './btw/useBtwPanelState';
-import { findCatalogModel } from '@/lib/opencode/model';
-import { resolveBtwSelection, useBtwStore } from '@/stores/useBtwStore';
+import { btwModelAvailability, resolveBtwSelection, useBtwStore } from '@/stores/useBtwStore';
 import { wasPromotedBtwSession } from '@/lib/sessionBtwMetadata';
 import { buildBtwSyntheticTexts, preparePendingBtwSend, startBtwSession } from '@/lib/btw';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
@@ -113,7 +112,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { cyclePermissionMode } from './permissionAutoAccept';
 import { displayedPermissionMode, nextPermissionMode } from '@/stores/utils/permissionAutoAccept';
-import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
+import { selectAutoReady, selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
 import { useKeybind } from '@/hooks/useKeybind';
 import { hasOpenDropdown } from '@/hooks/keyboard-shortcut-dom';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
@@ -548,6 +547,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // Subscribe to both sources read by getModelMetadata so async metadata and provider updates are observed.
     useConfigStore((state) => state.modelsMetadata);
     const providerCatalog = useConfigStore((state) => state.providers);
+    const autoReady = useRoutingStore(selectAutoReady);
     const currentModelMetadata = currentProviderId && currentModelId
         ? getModelMetadata(currentProviderId, currentModelId)
         : undefined;
@@ -573,11 +573,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const effectiveBtwSelection = resolveBtwSelection({
         agents,
         savedAgent: btwAgentSelection,
-        // An empty catalog has not loaded (or failed to): it cannot say a model is gone.
-        isModelAvailable: providerCatalog.length === 0 ? undefined : ({ providerId, modelId }) => {
-            const provider = providerCatalog.find((candidate) => candidate.id === providerId);
-            return Boolean(provider && findCatalogModel(provider.models, modelId));
-        },
+        isModelAvailable: btwModelAvailability(providerCatalog, autoReady),
         savedModel: btwModelSelection,
         savedVariant: btwSavedVariant,
         composerModel: currentProviderId && currentModelId ? { providerId: currentProviderId, modelId: currentModelId } : null,

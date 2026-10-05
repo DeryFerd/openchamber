@@ -1,12 +1,32 @@
 import type { PermissionMode } from './utils/permissionAutoAccept';
 import { create } from 'zustand';
-import type { Agent } from '@/lib/opencode/model';
+import { findCatalogModel, type Agent } from '@/lib/opencode/model';
+import { isAutoModel } from '@/lib/routing/autoModel';
 
 type BtwModelSelection = { providerId: string; modelId: string };
 export type BtwSelection = {
   agent: string | undefined;
   model: BtwModelSelection | null;
   variant: string | null | undefined;
+};
+
+/**
+ * Whether a saved btw model can still be used, judged against the catalog the
+ * model picker renders. Auto is never in that catalog: it is valid exactly
+ * while routing can honour it, as `hasProviderModel` in useConfigStore says.
+ * An empty catalog has not loaded (or failed to), so it cannot say a model is
+ * gone: there is no check then and the saved model wins.
+ */
+export const btwModelAvailability = (
+  providers: readonly { id: string; models: readonly { id: string; modelID: string }[] }[],
+  autoReady: boolean,
+): ((model: BtwModelSelection) => boolean) | undefined => {
+  if (providers.length === 0) return undefined;
+  return ({ providerId, modelId }) => {
+    if (isAutoModel(providerId, modelId)) return autoReady;
+    const provider = providers.find((candidate) => candidate.id === providerId);
+    return Boolean(provider && findCatalogModel(provider.models, modelId));
+  };
 };
 
 export const resolveBtwSelection = ({ agents, savedAgent, savedModel, savedVariant, composerModel, composerVariant, isModelAvailable }: {
