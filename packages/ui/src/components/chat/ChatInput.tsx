@@ -544,11 +544,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const configModelId = useConfigStore((state) => state.currentModelId);
     const currentProviderId = pinnedComposerSelection?.model?.providerId ?? configProviderId;
     const currentModelId = pinnedComposerSelection?.model?.modelId ?? configModelId;
-    const providerCatalog = useConfigStore((state) => state.providers);
     const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
     // Subscribe to both sources read by getModelMetadata so async metadata and provider updates are observed.
     useConfigStore((state) => state.modelsMetadata);
-    useConfigStore((state) => state.providers);
+    const providerCatalog = useConfigStore((state) => state.providers);
     const currentModelMetadata = currentProviderId && currentModelId
         ? getModelMetadata(currentProviderId, currentModelId)
         : undefined;
@@ -574,10 +573,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const effectiveBtwSelection = resolveBtwSelection({
         agents,
         savedAgent: btwAgentSelection,
-        isModelAvailable: React.useCallback(({ providerId, modelId }: { providerId: string; modelId: string }) => {
+        // An empty catalog has not loaded (or failed to): it cannot say a model is gone.
+        isModelAvailable: providerCatalog.length === 0 ? undefined : ({ providerId, modelId }) => {
             const provider = providerCatalog.find((candidate) => candidate.id === providerId);
             return Boolean(provider && findCatalogModel(provider.models, modelId));
-        }, [providerCatalog]),
+        },
         savedModel: btwModelSelection,
         savedVariant: btwSavedVariant,
         composerModel: currentProviderId && currentModelId ? { providerId: currentProviderId, modelId: currentModelId } : null,
