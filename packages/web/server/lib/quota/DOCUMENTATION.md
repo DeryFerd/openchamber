@@ -166,6 +166,8 @@ Web and VS Code accept finite numeric balances and non-empty numeric strings. Mi
 
 Credentials resolve in alias order, first match wins. OpenCode's China plan id `kimi-code-plan-cn` (kimi.com) comes before the pre-split `kimi-for-coding` and `kimi` ids, because a leftover pre-split key can hold a dead credential that would otherwise shadow the live China plan key and return 401. The global plan id `kimi-code-plan-global` (kimi.ai, API base `api.kimi.ai`) stays last: it is not verified that a global key works at the `api.kimi.com` usage address, so it must not outrank a working pre-split key.
 
+Many Kimi users hold a pay-as-you-go Moonshot platform key (prepaid vouchers, no Kimi Code subscription) under `KIMI_API_KEY`. The Kimi Code usage address refuses such a key with 401. On a 401 or 403 the provider therefore asks `GET https://api.moonshot.ai/v1/users/me/balance` with the same key and, when that answers with a numeric `data.available_balance`, reports it as a `credits_balance` window (USD, remaining only). If the balance read also fails, the original `API error: <status>` is returned; other HTTP errors never try the balance address.
+
 The provider computes `usedPercent` from whichever of `used`/`remaining` is present (`used` takes precedence when both exist) rather than assuming one field name. Both `packages/web/server/lib/quota/providers/kimi.js` and `packages/vscode/src/quotaProviders.ts` (`fetchKimiQuota`) must stay in sync — the VS Code extension duplicates this parsing logic rather than importing it.
 
 ## Ollama Cloud settings-page shapes

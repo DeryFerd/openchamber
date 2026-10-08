@@ -1677,6 +1677,41 @@ type KimiQuotaDependencies = {
   fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
 };
 
+const MOONSHOT_BALANCE_URL = 'https://api.moonshot.ai/v1/users/me/balance';
+
+type MoonshotBalancePayload = {
+  data?: { available_balance?: number };
+};
+
+// Mirrors packages/web/server/lib/quota/providers/kimi.js: a pay-as-you-go Moonshot
+// platform key is refused by the Kimi Code usage address, so its balance is read instead.
+// Returns the credits_balance windows, or null when they cannot be read.
+const fetchMoonshotBalanceWindows = async (
+  apiKey: string,
+  fetchImpl: (url: string, options: RequestInit) => Promise<Response>,
+): Promise<Record<string, UsageWindow> | null> => {
+  try {
+    const response = await fetchImpl(MOONSHOT_BALANCE_URL, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return null;
+    const balance = (await response.json() as MoonshotBalancePayload)?.data?.available_balance;
+    if (typeof balance !== 'number' || !Number.isFinite(balance)) return null;
+    return {
+      credits_balance: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${formatMoney(balance)}`,
+      }),
+    };
+  } catch {
+    return null;
+  }
+};
+
 export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: KimiQuotaDependencies = {}): Promise<ProviderResult> => {
   const apiKey = getKimiApiKey(await readAuth());
 
@@ -1700,6 +1735,18 @@ export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetch
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl);
+        if (balanceWindows) {
+          return buildResult({
+            providerId: 'kimi-for-coding',
+            providerName: 'Kimi for Coding',
+            ok: true,
+            configured: true,
+            usage: { windows: balanceWindows },
+          });
+        }
+      }
       return buildResult({
         providerId: 'kimi-for-coding',
         providerName: 'Kimi for Coding',
