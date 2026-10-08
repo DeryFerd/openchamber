@@ -543,6 +543,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.work-keep-in-group',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.sessionWork.field.keepInGroup',
+    descriptionKey: 'settings.openchamber.sessionWork.field.keepInGroupInfo',
+    keywords: ['in work', 'track', 'project group', 'folder', 'sidebar', 'keep'],
+  },
+  {
     id: 'sessions.small-model',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.smallModel.title',
@@ -652,6 +659,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['desktop', 'mini chat', 'shortcut', 'hotkey', 'global', 'keyboard'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
+  {
+    id: 'sessions.desktop-quake-mode',
+    page: 'general',
+    titleKey: 'settings.openchamber.desktopNetwork.field.quakeMode',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.quakeModeDescription',
+    keywords: ['desktop', 'quake', 'dropdown', 'hotkey', 'shortcut', 'height', 'global', 'background', 'tray', 'terminal'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+
+
   {
     id: 'sessions.desktop-ui-password',
     page: 'general',
