@@ -65,4 +65,47 @@ describe('macOS startup service', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it('does not snapshot OPENCHAMBER_* / OPENCODE_* app config from the enabling shell', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-startup-'));
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    const plistPath = path.join(home, 'Library', 'LaunchAgents', 'dev.openchamber.web.plist');
+    const writeFileSync = fs.writeFileSync;
+    const stopBeforeLaunchctl = new Error('Stop before activating launchd');
+    // App-configuration vars a desktop or agent session leaves in its shell.
+    const leaked = {
+      OPENCHAMBER_RUNTIME: 'desktop',
+      OPENCHAMBER_SKIP_API_COMPRESSION: 'true',
+      OPENCODE_HOST: 'http://stale-host:4096',
+      OPENCODE_SKIP_START: 'true',
+    };
+    const previous = {};
+    for (const key of Object.keys(leaked)) previous[key] = process.env[key];
+
+    try {
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' });
+      vi.spyOn(os, 'homedir').mockReturnValue(home);
+      Object.assign(process.env, leaked);
+      vi.spyOn(fs, 'writeFileSync').mockImplementation((file, ...args) => {
+        writeFileSync(file, ...args);
+        if (file === plistPath) throw stopBeforeLaunchctl;
+      });
+
+      expect(() => enableStartupService({ port: 3000, host: '0.0.0.0', uiPassword: 'pw' })).toThrow(stopBeforeLaunchctl);
+      const plist = fs.readFileSync(plistPath, 'utf8');
+      for (const key of Object.keys(leaked)) {
+        expect(plist).not.toContain(`<key>${key}</key>`);
+      }
+      // The service's own setting is still written explicitly.
+      expect(plist).toContain('<key>OPENCHAMBER_UI_PASSWORD</key>');
+    } finally {
+      vi.restoreAllMocks();
+      Object.defineProperty(process, 'platform', platform);
+      for (const key of Object.keys(leaked)) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });

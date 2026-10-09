@@ -109,6 +109,15 @@ function shouldPersistStartupEnv(key, value) {
   if (typeof value !== 'string') return false;
   if (/[\r\n]/.test(value)) return false;
 
+  // The service's own configuration is written explicitly after the snapshot
+  // (OPENCHAMBER_UI_PASSWORD, OPENCHAMBER_API_ONLY, OPENCHAMBER_DATA_DIR,
+  // OPENCODE_BINARY). Everything else in these namespaces comes from whatever
+  // shell runs `startup enable` - a desktop or agent session sets
+  // OPENCHAMBER_RUNTIME, OPENCHAMBER_SKIP_API_COMPRESSION, OPENCODE_HOST, and
+  // the like - and must not be frozen into the launchd plist or startup.env,
+  // where it silently changes the service's behavior on every boot.
+  if (key.startsWith('OPENCHAMBER_') || key.startsWith('OPENCODE_')) return false;
+
   // These are shell/session implementation details, not app configuration.
   const volatileKeys = new Set([
     '_',
