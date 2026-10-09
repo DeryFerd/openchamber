@@ -3589,7 +3589,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       onClick={() => {
         const fn = files.downloadFile;
         if (!fn || !selectedFile) return;
-        void fn(selectedFile.path).catch((error) => {
+        void fn(selectedFile.path, selectedFileReadOptions).catch((error) => {
           console.error('Download failed:', error);
           toast.error(t('sidebarFilesTree.toast.operationFailed'));
         });
@@ -4337,7 +4337,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               size="sm"
               onClick={() => {
                 const fn = files.downloadFile;
-                if (fn) void fn(selectedFile.path).catch((error) => {
+                if (fn) void fn(selectedFile.path, selectedFileReadOptions).catch((error) => {
                   console.error('Download failed:', error);
                   toast.error(t('sidebarFilesTree.toast.operationFailed'));
                 });

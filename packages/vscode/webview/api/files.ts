@@ -133,9 +133,16 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
     };
   },
 
-  async downloadFile(path: string): Promise<void> {
+  async downloadFile(path: string, options): Promise<void> {
     const target = normalizePath(path);
-    const url = `/api/fs/raw?path=${encodeURIComponent(target)}&download=true`;
+    const params = new URLSearchParams({ path: target, download: 'true' });
+    // The VS Code bridge resolves paths directly and has no active-workspace
+    // gate, so allowOutsideWorkspace has nothing to relax here; forwarding
+    // directory keeps the request shaped like the other reads.
+    if (options?.directory) {
+      params.set('directory', options.directory);
+    }
+    const url = `/api/fs/raw?${params.toString()}`;
     const a = document.createElement('a');
     a.href = url;
     a.download = target.split('/').pop() || 'file';
