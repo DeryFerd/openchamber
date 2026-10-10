@@ -411,6 +411,20 @@
     "confirmFileTreeMove": {
       "scope": "profile"
     },
+    "fileTreeSide": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop"
+      ]
+    },
+    "layoutAnimations": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop"
+      ]
+    },
     "autoCreateWorktree": {
       "scope": "profile"
     },
@@ -733,6 +747,10 @@
       "local": true
     },
     "contextRailHiddenSurfaces": {
+      "scope": "device",
+      "local": true
+    },
+    "contextSurfaceZones": {
       "scope": "device",
       "local": true
     },

@@ -8,6 +8,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
   type Modifier,
 } from '@dnd-kit/core';
 import {
@@ -51,7 +52,6 @@ type SortableTabsStripProps = {
       stays its accessible name and tooltip. For a row short on width. */
   iconOnly?: boolean;
   animateActivePill?: boolean;
-  activePillLowercase?: boolean;
   /** Position the active-pill indicator with left/top instead of translate3d.
       Use when the strip lives inside an ancestor that transform-animates
       (e.g. a sliding mobile drawer): creating a composited layer mid-slide
@@ -71,7 +71,20 @@ type SortableTabsStripProps = {
     close: () => void;
   }) => React.ReactNode;
   className?: string;
+  /**
+   * A tab dragged out of the strip does something else than reorder (the
+   * context panel moves its surface to another zone). Called when a drag
+   * starts, with a test for "the pointer is outside the strip"; the returned
+   * gesture decides on drop. A drop it takes skips the reorder.
+   */
+  onTabDragOut?: (id: string, isOutside: (point: { x: number; y: number }) => boolean) => {
+    finish: () => boolean;
+    cancel: () => void;
+  } | null;
 };
+
+// How far past the strip's top and bottom a drag still reorders.
+const DRAG_OUT_SLACK_PX = 16;
 
 // Keep in sync with `.pill-tabs__indicator--is-animated` in index.css.
 const PILL_SWITCH_ANIMATION_MS = 280;
@@ -128,12 +141,12 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   activePillButtonClassName,
   inactiveTabsIconOnly = false,
   animateActivePill,
-  activePillLowercase = true,
   nonCompositedIndicator = false,
   intrinsicWidth = false,
   iconOnly = false,
   tabContextMenu,
   className,
+  onTabDragOut,
 }) => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
@@ -384,7 +397,31 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     };
   }, [activeId, isScrollable, items.length, updateOverflow]);
 
+  const dragOutRef = React.useRef<ReturnType<NonNullable<typeof onTabDragOut>> | null>(null);
+  const handleDragStart = React.useCallback((event: DragStartEvent) => {
+    dragOutRef.current?.cancel();
+    dragOutRef.current = null;
+    const strip = scrollRef.current;
+    if (!onTabDragOut || !strip) return;
+    // Measured once: nothing in the strip moves the strip itself during a drag.
+    const rect = strip.getBoundingClientRect();
+    dragOutRef.current = onTabDragOut(String(event.active.id), (point) => (
+      point.x < rect.left || point.x > rect.right
+      || point.y < rect.top - DRAG_OUT_SLACK_PX || point.y > rect.bottom + DRAG_OUT_SLACK_PX
+    ));
+  }, [onTabDragOut]);
+  const handleDragCancel = React.useCallback(() => {
+    dragOutRef.current?.cancel();
+    dragOutRef.current = null;
+  }, []);
+  React.useEffect(() => () => dragOutRef.current?.cancel(), []);
+
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
+    const dragOut = dragOutRef.current;
+    dragOutRef.current = null;
+    if (dragOut?.finish()) {
+      return;
+    }
     if (!onReorder) {
       return;
     }
@@ -428,7 +465,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
           usesActivePillIndicator && 'pill-tabs__track',
           usesActivePillIndicator && (activePillInsetClassName ?? 'gap-0.5 py-0.5'),
           useUnderlineIndicator && 'items-center overflow-y-hidden',
-          showPillTrackBackground && 'rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] p-0.5 gap-0.5',
+          showPillTrackBackground && 'rounded-lg bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] p-0.5 gap-0.5',
           isScrollable
             ? 'overflow-x-auto scrollbar-none'
             : 'overflow-x-hidden',
@@ -440,7 +477,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         {usesActivePillIndicator && pillRect ? (
           <div
             className={cn(
-              'pointer-events-none absolute left-0 top-0 z-0 rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] bg-[var(--surface-elevated)]',
+              'pointer-events-none absolute left-0 top-0 z-0 rounded-md bg-[var(--surface-elevated)]',
               // Lifted card look: hairline edge plus a soft ambient shadow rather
               // than a hard border, so the pill reads as raised above the track.
               'border border-[color-mix(in_srgb,var(--foreground)_7%,transparent)]',
@@ -554,9 +591,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   onPointerCancel={usesIndicator ? () => setPressedId(null) : undefined}
                   className={cn(
                     usesActivePillIndicator
-                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'
+                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-md text-sm font-medium transition-colors duration-150 !min-h-0'
                       : 'flex h-full min-w-0 flex-nowrap items-center typography-micro',
-                    usesActivePillIndicator && activePillLowercase ? 'lowercase' : null,
                     usesActivePillIndicator && (showInactiveIconOnly ? 'gap-0' : 'gap-1.5'),
                     usesActivePillIndicator
                       ? useIntrinsicPillSizing
@@ -572,7 +608,10 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                         ? 'max-w-56 justify-start truncate px-3 text-left'
                         : 'w-full justify-center truncate px-3 text-center',
                     usesActivePillIndicator
-                      ? (activePillButtonClassName ?? (isActivePillVariant ? (isMobile ? 'h-[38px]' : 'h-[31px]') : 'h-7'))
+                      // 24px buttons in a 2px-padded track: the switch is
+                      // 28px, as tall as the toolbar controls beside it.
+                      // Callers may add classes (padding) on top.
+                      ? cn(isActivePillVariant ? (isMobile ? 'h-[38px]' : 'h-6') : 'h-7', activePillButtonClassName)
                       : null,
                     usesActivePillIndicator
                       ? isActive
@@ -709,6 +748,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragCancel={handleDragCancel}
       onDragEnd={handleDragEnd}
       modifiers={[restrictToXAxis]}
     >

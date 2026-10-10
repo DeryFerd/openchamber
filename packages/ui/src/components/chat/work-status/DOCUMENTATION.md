@@ -24,8 +24,11 @@ selected session even without metrics, so a saved collapsed state can reopen.
 
 It is **not** a context-panel surface. It is not registered in
 `lib/surfaces/registry.ts`, has no rail icon, no tab, no persisted width and no
-resizer. It is a card floating inside the chat column — rounded border, faint
-fill, its own margin — rather than a docked pane flush against the window edge.
+resizer. It is a card inside the chat column — rounded, with the dropdown's
+hairline ring (`oc-panel-edge`, shared with the context panel card), a faint
+fill and its own margin — rather than a docked pane flush against the window
+edge. Opened over the transcript it is a dropdown and takes the dropdown's
+full edge, lit top and tight shadows included (`data-edge-floating`).
 When it overlays the transcript, it uses the shared `oc-glass-panel` surface;
 the inline card keeps its lighter, non-blurred fill instead.
 
@@ -208,7 +211,7 @@ subscribes to `currentProviderId` / `currentModelId` for the limits.
 reporting assistant turn is the answer, not a sum across turns.
 
 Which message is "latest" is decided by `findLatestContextFill` in
-`stores/utils/tokenUtils.ts`, shared with the header, VS Code header, mini chat,
+`stores/utils/tokenUtils.ts`, shared with the VS Code header, mini chat,
 mobile metadata and context sidebar. A finished compaction's own record (a
 `compaction` message with `status: 'completed'`) is not a reading: its tokens
 describe the summarizing request,
@@ -379,14 +382,14 @@ settings; an empty list enables everything. Complete settings
 snapshots own this preference; unrelated partial save echoes leave it unchanged.
 
 `workStatusPanelVisible` is separate and transient: the switch can be on while
-layout still refuses the panel. The header and the git rail read it to drop the
-readouts the panel already carries, and it is deliberately not persisted — it
+layout still refuses the panel. The header's project/branch line and the git
+rail read it to drop the readouts the panel already carries, and it is deliberately not persisted — it
 describes the current frame, not a preference.
 
 ## Appearing and disappearing
 
 The card keeps its width and only fades, on the slot's duration and curve
-(`LAYOUT_ANIMATION_MS`, ease-out); the slot animates the width. It stays
+(`LAYOUT_ANIMATION_MS` through `useLayoutAnimationMs`, ease-out; zero when the `layoutAnimations` setting is off); the slot animates the width. It stays
 mounted wherever it could ever show, so the fade has something to animate;
 its content is dropped once the fade finishes. A card whose sections all
 reported nothing gives its column back. When it is shown again the presence
@@ -440,10 +443,12 @@ Rows that name something the app can already show are buttons:
 
 | Row | Opens |
 |---|---|
-| Context | the context overview (`openContextOverview`), same destination as the header readout |
+| Context | the context overview (`openContextOverview`), same destination as the rail's Context surface |
 | Changes | working-tree diff (`openContextPanelTab`, `diffScope: 'working'`, no target path) |
 | Branch | git surface (`openContextSurface(dir, 'git')`) |
 | Pull request, Checks | PR surface (`openContextSurface(dir, 'pr')`) |
+| App icon (Project heading, right) | opens the project in the chosen app (`OpenInAppButton`, desktop with a local host only); its chevron copies the path or picks another app. The project name beside the title is plain text |
+| Project action | runs or stops the selected project action (`ProjectActionsButton`); its chevron picks another action. This row is the only place the control lives — the header no longer carries it — so a project without a repository still gets a Project section |
 | Subagent | that child session's chat tab, read-only |
 | Goal (row) | the composer's own `SessionGoalDialog` |
 | Goal (pause/resume) | `setSessionGoalStatus(sessionId, directory, status)` |

@@ -4,7 +4,8 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { beginLayoutAnimation, LAYOUT_ANIMATION_EASING, LAYOUT_ANIMATION_MS, runWhenLayoutSettled } from '@/lib/layoutAnimation';
+import { beginLayoutAnimation, LAYOUT_ANIMATION_EASING, runWhenLayoutSettled } from '@/lib/layoutAnimation';
+import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 
 const SIDEBAR_CONTENT_WIDTH = 280;
 // Wide enough for the toolbar's eight icons and a labelled titlebar button.
@@ -90,19 +91,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
     if (isOpen && contentSkipped) {
         setContentSkipped(false);
     }
+    const layoutAnimationMs = useLayoutAnimationMs();
     const isOpenRef = React.useRef(isOpen);
     const previousOpenRef = React.useRef(isOpen);
     React.useLayoutEffect(() => {
         isOpenRef.current = isOpen;
         if (previousOpenRef.current === isOpen) return;
         previousOpenRef.current = isOpen;
-        beginLayoutAnimation(LAYOUT_ANIMATION_MS);
+        beginLayoutAnimation(layoutAnimationMs);
         if (!isOpen) {
             runWhenLayoutSettled(() => {
                 if (!isOpenRef.current) setContentSkipped(true);
             });
         }
-    }, [isOpen]);
+    }, [isOpen, layoutAnimationMs]);
 
     if (isMobile) {
         return null;
@@ -188,7 +190,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 maxWidth: `${currentWidth}px`,
                 ['--oc-left-sidebar-width' as string]: `${publishedWidth}px`,
                 overflowX: 'clip',
-                transitionDuration: `${LAYOUT_ANIMATION_MS}ms`,
+                transitionDuration: `${layoutAnimationMs}ms`,
                 transitionTimingFunction: LAYOUT_ANIMATION_EASING,
             }}
         >
@@ -215,12 +217,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             )}
             <aside
                 className={cn(
-                    'relative z-10 flex h-full shrink-0 flex-col transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
+                    'relative z-10 flex h-full shrink-0 flex-col transition-opacity ease-out motion-reduce:transition-none',
                     isResizing && 'pointer-events-none',
                     !isOpen && 'pointer-events-none select-none opacity-0'
                 )}
                 style={{
                     width: 'var(--oc-left-sidebar-width)',
+                    transitionDuration: `${layoutAnimationMs}ms`,
                     overflowX: 'hidden',
                     contentVisibility: contentSkipped ? 'hidden' : undefined,
                 }}

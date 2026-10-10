@@ -183,6 +183,21 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
   },
   {
+    id: 'appearance.file-tree-side',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.fileTreeSide',
+    keywords: ['files', 'tree', 'explorer', 'left', 'right', 'side', 'editor'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
+  },
+  {
+    id: 'appearance.layout-animations',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.layoutAnimations',
+    descriptionKey: 'settings.openchamber.visual.field.layoutAnimationsInfo',
+    keywords: ['animation', 'motion', 'sidebar', 'panel', 'slide', 'instant'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
+  },
+  {
     id: 'appearance.file-editor-keymap',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.fileEditorKeymap',

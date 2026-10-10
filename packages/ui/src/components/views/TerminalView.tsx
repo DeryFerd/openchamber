@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
-import { ContextMenuItem } from '@/components/ui/context-menu';
+import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { TerminalTabRenameDialog } from '@/components/terminal/TerminalTabRenameDialog';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from '@/components/icon/icons';
@@ -33,6 +33,10 @@ import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore'
 import { applyTerminalModifier, terminalControlCharacter, terminalSequenceForKey, type TerminalModifier as Modifier, type TerminalQuickKey as MobileKey } from '@/lib/terminalInput';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { observeTerminalSessions } from '@/lib/terminalSessionObserver';
+import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
+import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
+import { useZoneSurfaceDragOut } from '@/components/layout/zoneSurfaceDragContext';
+import { ZoneMoveMenuItems } from '@/components/layout/ZoneMoveMenuItems';
 
 type TerminalViewProps = {
     visible?: boolean;
@@ -111,6 +115,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const terminalLoginShell = useUIStore(state => state.terminalLoginShells.includes(state.terminalShell));
     const { isMobile, isTablet, hasTouchOnlyPointer } = useDeviceInfo();
     const isTouchTerminal = isMobile || isTablet;
+    const inPanelHeader = useInContextPanelHeader();
     const useTouchTerminalInput = (isTouchTerminal || hasTouchOnlyPointer) && runtime.platform === 'web';
     // Tabs are supported for web + desktop runtimes, including mobile (not VSCode).
     const enableTabs = runtime.platform !== 'vscode';
@@ -858,6 +863,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
 
     // Project action tabs are named by their action and renamed on every run,
     // so only plain terminals offer Rename.
+    const zoneDragOut = useZoneSurfaceDragOut();
+    const handleTabDragOut = React.useMemo(
+        () => (zoneDragOut ? (_tabId: string, isOutside: (point: { x: number; y: number }) => boolean) => zoneDragOut(isOutside) : undefined),
+        [zoneDragOut],
+    );
     const renderTabContextMenu = React.useCallback(
         ({ id, close }: { id: string; close: () => void }): React.ReactNode => {
             const tab = directoryTerminalState?.tabs.find((entry) => entry.id === id);
@@ -874,10 +884,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                         <Icon name="close" className="mr-2 size-4" />
                         {t('terminalView.tabs.closeTabTitle')}
                     </ContextMenuItem>
+                    {/* In a zone, a tab moves the whole terminal, like a zone's own tabs. */}
+                    {zoneDragOut ? (
+                        <>
+                            <ContextMenuSeparator />
+                            <ZoneMoveMenuItems mode="terminal" />
+                        </>
+                    ) : null}
                 </>
             );
         },
-        [directoryTerminalState?.tabs, t]
+        [directoryTerminalState?.tabs, t, zoneDragOut]
     );
 
     const handleViewportInput = React.useCallback(
@@ -1235,10 +1252,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                 onRename={handleRenameTab}
                 onClose={() => setRenamingTabId(null)}
             />
-            <div className={cn('app-region-no-drag sticky top-0 z-20 shrink-0 bg-[var(--surface-background)] text-xs', isTouchTerminal ? 'px-3 py-1.5' : 'pl-3 pr-1.5 py-1')}>
-                {enableTabs && directoryTerminalState ? (
-                    <div className="flex items-center gap-2 pl-1 pr-1">
-                        <div className={cn('min-w-0 flex-1', isTouchTerminal ? 'h-8' : 'h-7')}>
+            {enableTabs && directoryTerminalState ? (
+                <ContextPanelHeaderToolbar>
+                    <div className={cn('app-region-no-drag flex min-w-0 flex-1 items-center gap-2 text-xs', inPanelHeader ? 'pr-1' : cn('sticky top-0 z-20 shrink-0 bg-[var(--surface-background)]', isTouchTerminal ? 'px-4 py-1.5' : 'pl-4 pr-2.5 py-1'))}>
+                        <div className={cn('min-w-0 flex-1', inPanelHeader ? 'self-stretch' : isTouchTerminal ? 'h-8' : 'h-7')}>
                             <SortableTabsStrip
                                 items={terminalTabItems}
                                 activeId={activeTabId}
@@ -1246,6 +1263,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                                 onClose={handleCloseTab}
                                 onReorder={handleReorderTab}
                                 tabContextMenu={renderTabContextMenu}
+                                onTabDragOut={handleTabDragOut}
                                 layoutMode="scrollable"
                                 variant="default"
                                 className="h-full bg-transparent"
@@ -1307,20 +1325,16 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                             ) : null}
                         </div>
                     </div>
-                ) : null}
+                </ContextPanelHeaderToolbar>
+            ) : null}
 
-                {!isTouchTerminal && showQuickKeys && enableTabs && directoryTerminalState ? (
-                    <div className="mt-2 flex flex-wrap items-center gap-1 pl-1 pr-1">
+            {!isTouchTerminal && showQuickKeys ? (
+                <div className="app-region-no-drag shrink-0 bg-[var(--surface-background)] pb-1 pl-4 pr-2.5 pt-1 text-xs">
+                    <div className="flex flex-wrap items-center gap-1">
                         {quickKeysControls}
                     </div>
-                ) : null}
-
-                {!isTouchTerminal && showQuickKeys && (!enableTabs || !directoryTerminalState) ? (
-                    <div className="mt-2 flex flex-wrap items-center gap-1">
-                        {quickKeysControls}
-                    </div>
-                ) : null}
-            </div>
+                </div>
+            ) : null}
 
             <div
                 className="relative flex-1 overflow-hidden"
