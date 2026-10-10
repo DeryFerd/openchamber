@@ -898,24 +898,30 @@ describe('terminal runtime', () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
       expect(first.messages.some((message) => message?.t === 'output' && message.s === 'term-second')).toBe(false);
 
+      // Output after a quiet spell goes out at once; what follows within the
+      // batch window joins one frame.
       processes[0].emitData('ok\r\n');
-      expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 1, d: 'ok\r\n' });
       processes[0].emitData('\u001b[6n');
-      expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 2, d: '\u001b[6n', r: '' });
       for (let index = 0; index < 8193; index += 1) processes[0].emitData('x');
-      expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 3, d: 'x'.repeat(8193) });
-      await new Promise(resolve => setTimeout(resolve, 25));
+      expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 1, d: 'ok\r\n' });
+      expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 2, d: `\u001b[6n${'x'.repeat(8193)}`, r: 'x'.repeat(8193) });
+      await new Promise(resolve => setTimeout(resolve, 40));
       expect(first.messages.some(message => message?.t === 'output' && message.s === 'term-live')).toBe(false);
       processes[0].emitData('before\u001b[');
       processes[0].emitData('6nafter');
-      expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 4, d: 'before\u001b[6nafter', r: 'beforeafter' });
+      expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 3, d: 'before\u001b[', r: 'before' });
+      expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 4, d: '6nafter', r: 'after' });
+      await new Promise(resolve => setTimeout(resolve, 40));
       const sizedChunk = 's'.repeat(32 * 1024);
       const originalSetTimeout = globalThis.setTimeout;
       const delayedBatchTimer = vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) =>
         originalSetTimeout(callback, delay === 12 ? 1000 : delay, ...args));
       try {
+        // A full batch goes out without waiting for the window to close.
+        processes[0].emitData('lead');
         processes[0].emitData(sizedChunk);
-        expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 5, d: sizedChunk });
+        expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 5, d: 'lead' });
+        expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 6, d: sizedChunk });
       } finally { delayedBatchTimer.mockRestore(); }
       await new Promise(resolve => setTimeout(resolve, 25));
       expect(first.messages.some(message => message?.t === 'output' && message.s === 'term-live')).toBe(false);
@@ -933,10 +939,10 @@ describe('terminal runtime', () => {
       const second = await openTerminalSocket(socketUrl);
       sockets.push(second.socket);
       second.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-live' }));
-      expect(await second.next('snapshot')).toMatchObject({ s: 'term-live', q: 5, history: `ok\r\n${'x'.repeat(8193)}beforeafter${sizedChunk}`, status: 'running', cols: 120, rows: 40 });
+      expect(await second.next('snapshot')).toMatchObject({ s: 'term-live', q: 6, history: `ok\r\n${'x'.repeat(8193)}beforeafterlead${sizedChunk}`, status: 'running', cols: 120, rows: 40 });
       // Compare snapshots to the old whole-string trim rule, including UTF-16
       // pairs split across PTY callbacks and a boundary inside UTF-8 bytes.
-      let expectedHistory = `ok\r\n${'x'.repeat(8193)}beforeafter${sizedChunk}`;
+      let expectedHistory = `ok\r\n${'x'.repeat(8193)}beforeafterlead${sizedChunk}`;
       const appendExpected = (text, chunks = [text]) => {
         expectedHistory += text;
         const bytes = Buffer.from(expectedHistory);
@@ -969,7 +975,9 @@ describe('terminal runtime', () => {
       });
       second.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-kill' }));
       await second.next('snapshot');
+      processes[2].emitData('sent at once ');
       processes[2].emitData('pending before kill');
+      expect(await second.next('output', 'term-kill')).toMatchObject({ s: 'term-kill', d: 'sent at once ' });
       const killed = await fetch(`${base}/api/terminal/force-kill`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ cwd: '/repo' }),

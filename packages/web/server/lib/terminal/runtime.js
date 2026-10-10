@@ -302,6 +302,18 @@ export function createTerminalRuntime({
     publish(session, { t: 'output', d: raw, ...(raw !== replay ? { r: replay } : {}) });
   };
 
+  // Output after a quiet spell goes out at once, so a keystroke echo never
+  // waits for the timer. Output that follows within OUTPUT_BATCH_MS joins one
+  // frame, and the window stays open while the burst continues.
+  const openOutputWindow = (session) => {
+    session.outputTimer = setTimeout(() => {
+      session.outputTimer = null;
+      if (!session.pendingOutput) return;
+      flushOutput(session);
+      openOutputWindow(session);
+    }, OUTPUT_BATCH_MS);
+  };
+
   const discardOutput = (session) => {
     if (session.outputTimer) clearTimeout(session.outputTimer);
     session.outputTimer = null;
@@ -361,7 +373,7 @@ export function createTerminalRuntime({
           const output = session.pendingOutput ??= { raw: [], replay: [], chars: 0 };
           output.raw.push(event.data); output.replay.push(sanitized.visible); output.chars += event.data.length;
           if (output.chars >= MAX_OUTPUT_BATCH_CHARS) flushOutput(session);
-          else if (!session.outputTimer) session.outputTimer = setTimeout(() => flushOutput(session), OUTPUT_BATCH_MS);
+          else if (!session.outputTimer) { flushOutput(session); openOutputWindow(session); }
         } else {
           flushOutput(session);
           session.status = 'exited';
