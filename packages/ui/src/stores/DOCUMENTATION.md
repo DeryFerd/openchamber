@@ -633,7 +633,7 @@ Good:
 - `useGitStatus(directory)`
 - `useGitBranches(directory)`
 - `useGitBranchLabel(directory)`
-- `useGitRepoStatusMap(directories)`
+- `useGitRepoStatusMap(directories, enabled?)` (disabled holds its last result)
 
 Bad:
 

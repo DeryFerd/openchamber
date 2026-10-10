@@ -35,9 +35,26 @@ export const useProjectRepoStatus = (args: Args): void => {
   // sidebar has not populated yet is read.
   const requestedStatusRef = React.useRef<{ runtimeKey: string; git: RuntimeAPIs['git']; paths: Set<string> } | null>(null);
 
+  // Showing the sidebar again refreshes what it already populated: paused
+  // while hidden, the statuses may be old. `ensureStatus` skips a path read
+  // within the last few seconds.
+  const wasEnabledRef = React.useRef(enabled);
+  React.useEffect(() => {
+    const reshown = enabled && !wasEnabledRef.current;
+    wasEnabledRef.current = enabled;
+    const requested = requestedStatusRef.current;
+    if (!reshown || !git || !requested || requested.git !== git || requested.runtimeKey !== gitRuntimeKey) return;
+    for (const path of requested.paths) {
+      void runBackgroundNetworkTask(() => ensureStatus(path, git));
+    }
+  }, [enabled, ensureStatus, git, gitRuntimeKey]);
+
   // Populate the centralized Git store for each project.
   React.useEffect(() => {
-    if (!enabled || !git || normalizedProjects.length === 0) {
+    // Hidden: paused, keeping what it found, so showing the sidebar again
+    // neither re-reads every project's status nor redraws the list without it.
+    if (!enabled) return;
+    if (!git || normalizedProjects.length === 0) {
       requestedStatusRef.current = null;
       setProjectRepoStatus(new Map());
       return;

@@ -270,7 +270,7 @@ describe('useUIStore context panel tabs', () => {
     expect(tabs.some((tab) => tab.mode === 'plan')).toBe(true);
   });
 
-  test('drops invalid persisted context-panel width fractions', async () => {
+  test('ignores width fractions persisted by older builds and keeps the pixel width', async () => {
     const directory = '/repo';
     useUIStore.persist.setOptions({ storage: {
       getItem: () => ({
@@ -305,8 +305,8 @@ describe('useUIStore context panel tabs', () => {
       await useUIStore.persist.rehydrate();
 
       const panel = useUIStore.getState().contextPanelByDirectory[directory];
-      expect(panel?.widthFractionByMode).toEqual({ chat: 0.4, walkthrough: 0.8 });
-      expect(panel?.widthByMode.walkthrough).toBe(800);
+      expect(panel).not.toHaveProperty('widthFractionByMode');
+      expect(panel?.widthByMode).toEqual({ walkthrough: 800 });
     } finally {
       useUIStore.persist.setOptions(originalPersistOptions);
     }
@@ -905,7 +905,6 @@ describe('useUIStore closeContextPanelTab surface stability', () => {
     expect(state?.tabs.map((tab) => tab.mode)).toEqual(['terminal', 'file']);
     expect(useUIStore.getState().contextEditorTreeVisible).toBe(true);
     expect(state?.widthByMode).toEqual(stateBefore?.widthByMode);
-    expect(state?.widthFractionByMode).toEqual(stateBefore?.widthFractionByMode);
   });
 
   test('closing the empty editor tab itself still closes the file surface', () => {
@@ -970,7 +969,6 @@ describe('useUIStore closeContextPanelTabs bulk', () => {
     expect(state?.tabs.some((tab) => tab.mode === 'terminal')).toBe(true);
     expect(useUIStore.getState().contextEditorTreeVisible).toBe(true);
     expect(state?.widthByMode).toEqual(state0?.widthByMode);
-    expect(state?.widthFractionByMode).toEqual(state0?.widthFractionByMode);
   });
 
   test('closing only inactive-mode tabs leaves the active tab and panel intact', () => {
@@ -1023,30 +1021,17 @@ describe('useUIStore per-surface panel widths', () => {
     expect(state?.widthByMode.browser).toBe(undefined);
   });
 
-  test('captures the clamped width as a responsive ratio when the panel area is known', () => {
-    useUIStore.getState().openContextPanelTab(directory, { mode: 'diff' });
-    useUIStore.getState().setContextPanelWidth(directory, 'diff', 100, 1000);
-    useUIStore.getState().setContextPanelWidth(directory, 'git', 700, 1000);
-
-    const state = useUIStore.getState().contextPanelByDirectory[directory];
-    expect(state?.widthByMode.diff).toBe(320);
-    expect(state?.widthFractionByMode.diff).toBe(0.32);
-    expect(state?.widthFractionByMode.git).toBe(0.7);
-    expect(state?.widthFractionByMode.browser).toBe(undefined);
-  });
-
-  test('a pixel resize without a valid area replaces the previous ratio', () => {
+  test('a later resize replaces the remembered width', () => {
     const store = useUIStore.getState();
-    store.setContextPanelWidth(directory, 'walkthrough', 800, 1000);
-    store.setContextPanelWidth(directory, 'walkthrough', 600, Number.POSITIVE_INFINITY);
+    store.setContextPanelWidth(directory, 'walkthrough', 800);
+    store.setContextPanelWidth(directory, 'walkthrough', 600.4);
     const panel = useUIStore.getState().contextPanelByDirectory[directory];
     expect(panel?.widthByMode.walkthrough).toBe(600);
-    expect(panel?.widthFractionByMode.walkthrough).toBeUndefined();
   });
 
   test('tree resizing and visibility changes preserve the full editor width', () => {
     const store = useUIStore.getState();
-    store.setContextPanelWidth(directory, 'file', 800, 1000);
+    store.setContextPanelWidth(directory, 'file', 800);
     store.openContextFile(directory, '/repo/a.ts');
     store.setContextEditorTreeWidth(260);
     store.toggleContextEditor();
@@ -1060,7 +1045,6 @@ describe('useUIStore per-surface panel widths', () => {
     const panel = useUIStore.getState().contextPanelByDirectory[directory];
     expect(useUIStore.getState().contextEditorTreeWidth).toBe(300);
     expect(panel?.widthByMode).toEqual({ file: 800 });
-    expect(panel?.widthFractionByMode).toEqual({ file: 0.8 });
   });
 
   test('restores the shared tree width and ignores obsolete tree-only panel widths', async () => {
@@ -1075,7 +1059,6 @@ describe('useUIStore per-surface panel widths', () => {
                 isOpen: true,
                 expanded: false,
                 widthByMode: { 'file-tree': 400, file: 800 },
-                widthFractionByMode: { 'file-tree': 0.4, file: 0.8 },
                 touchedAt: 1,
                 activeTabId: null,
                 tabs: [],
@@ -1095,7 +1078,6 @@ describe('useUIStore per-surface panel widths', () => {
       const panel = useUIStore.getState().contextPanelByDirectory[directory];
       expect(useUIStore.getState().contextEditorTreeWidth).toBe(260);
       expect(panel?.widthByMode).toEqual({ file: 800 });
-      expect(panel?.widthFractionByMode).toEqual({ file: 0.8 });
     } finally {
       useUIStore.persist.setOptions(originalPersistOptions);
     }

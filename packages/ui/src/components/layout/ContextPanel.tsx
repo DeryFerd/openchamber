@@ -82,7 +82,10 @@ import { guestHasSharedSurface, guestSurfaceDocking, type GuestSurfaceDocking } 
 import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
 import { GUEST_SURFACE_DOCK_SIZE_MIN } from '@openchamber/sdk';
 import { isPluginContextPanelMode, pluginIdFromMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
-import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
+import { getContextSurfaceDefaultWidth } from '@/lib/surfaces/registry';
+import { beginLayoutAnimation, cancelWhenLayoutSettled, LAYOUT_ANIMATION_EASING, LAYOUT_ANIMATION_MS, runWhenLayoutSettled } from '@/lib/layoutAnimation';
+import { WORK_STATUS_COLUMN_WIDTH } from '@/components/chat/work-status/useWorkStatusVisibility';
+import { setWorkStatusHost, useRightSlotStore } from './rightSlot';
 import { isEditorEventTarget } from '@/lib/editorFocus';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
@@ -136,10 +139,10 @@ const clampWidth = (width: number, maxWidth: number): number => {
 
 // Ceiling derived from the space the panel actually shares with the chat:
 // everything except a minimum chat column, never below the panel minimum.
-const maxPanelWidth = (availableWidth?: number | null): number => {
-  const base = availableWidth
-    ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
-  return Math.max(CONTEXT_PANEL_MIN_WIDTH, base - CONTEXT_CHAT_MIN_WIDTH);
+// Without a measured area there is no ceiling (see `areaWidth` below).
+const maxPanelWidth = (availableWidth: number | null): number => {
+  if (availableWidth === null) return Number.POSITIVE_INFINITY;
+  return Math.max(CONTEXT_PANEL_MIN_WIDTH, availableWidth - CONTEXT_CHAT_MIN_WIDTH);
 };
 
 const getAvailablePanelWidth = (panel: HTMLElement | null): number | null => {
@@ -570,7 +573,8 @@ export const ContextPanel: React.FC = () => {
   }, [directoryKey, shownBrowserTabId]);
   // The issues and PRs board stays beside it and narrows instead.
   const isOpen = Boolean(panelState?.isOpen && activeTab);
-  const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
+  const workStatusReserved = useRightSlotStore((state) => state.workStatusReserved);
+  const chatCovered = useRightSlotStore((state) => state.chatCovered);
   const hasOpenEditorFile = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'file' && tab.targetPath),
     [tabs],
@@ -581,24 +585,29 @@ export const ContextPanel: React.FC = () => {
   const activeModeForWidth = activeTab?.mode ?? null;
   const isTreeOnly = activeModeForWidth === 'file' && !showsEditor;
   const isExpanded = Boolean(isOpen && panelState?.expanded && !isTreeOnly);
+  // A fixed width in px: the one the user resized this surface to, else the
+  // surface's default. It does not follow the chat area, so a sidebar toggle
+  // or a window resize leaves it alone unless the chat would get too narrow.
   const manualWidth = activeModeForWidth ? panelState?.widthByMode?.[activeModeForWidth] : undefined;
-  const manualWidthFraction = activeModeForWidth ? panelState?.widthFractionByMode?.[activeModeForWidth] : undefined;
-  const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
-  const widthFallbackBase = availablePanelAreaWidth
-    ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
-  const effectiveManualWidth = manualWidthFraction != null && availablePanelAreaWidth != null
-    ? Math.round(manualWidthFraction * availablePanelAreaWidth)
-    : manualWidth;
-  const width = isTreeOnly
+  const desiredWidth = isTreeOnly
     ? contextEditorTreeWidth
-    : clampWidth(effectiveManualWidth ?? Math.round(widthFraction * widthFallbackBase), maxPanelWidth(availablePanelAreaWidth ?? widthFallbackBase));
+    : clampWidth(manualWidth ?? (activeModeForWidth ? getContextSurfaceDefaultWidth(activeModeForWidth) : CONTEXT_PANEL_DEFAULT_WIDTH), Number.POSITIVE_INFINITY);
 
-  // Convert legacy pixel-only preferences to a ratio the first time the
-  // available area is known, so existing users also get responsive sizing.
-  React.useEffect(() => {
-    if (!directoryKey || !activeModeForWidth || isTreeOnly || manualWidthFraction != null || manualWidth == null || availablePanelAreaWidth == null) return;
-    setContextPanelWidth(directoryKey, activeModeForWidth, manualWidth, availablePanelAreaWidth);
-  }, [activeModeForWidth, availablePanelAreaWidth, directoryKey, isTreeOnly, manualWidth, manualWidthFraction, setContextPanelWidth]);
+  // The chat area's width, as state only while it decides something: the
+  // panel is expanded over it, or the ceiling binds (the panel would leave
+  // the chat less than its minimum). Otherwise it is null, so the many width
+  // changes that cannot matter (every frame of a sidebar animation, most
+  // window resizes) do not re-render the panel and everything in it. Changes
+  // that arrive during a side-column animation are applied once it ends.
+  const [areaWidth, setAreaWidth] = React.useState<number | null>(null);
+  const measuredAreaWidthRef = React.useRef<number | null>(null);
+  const areaDecidesRef = React.useRef<(areaWidth: number) => boolean>(() => false);
+  areaDecidesRef.current = (measured) => isExpanded || (!isTreeOnly && measured - CONTEXT_CHAT_MIN_WIDTH < desiredWidth);
+  const applyAreaWidth = React.useCallback(() => {
+    const measured = measuredAreaWidthRef.current;
+    setAreaWidth(measured !== null && areaDecidesRef.current(measured) ? measured : null);
+  }, []);
+  const width = isTreeOnly ? desiredWidth : clampWidth(desiredWidth, maxPanelWidth(areaWidth));
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
     for (const tab of tabs) {
@@ -618,21 +627,31 @@ export const ContextPanel: React.FC = () => {
   const panelRef = React.useRef<HTMLElement | null>(null);
   const wasOpenRef = React.useRef(false);
 
-  // Defaults and manually resized surfaces track the same available area.
   React.useLayoutEffect(() => {
     const parent = panelRef.current?.parentElement;
     if (!parent || typeof ResizeObserver === 'undefined') {
       return;
     }
 
-    const observer = new ResizeObserver(() => {
-      setAvailablePanelAreaWidth(parent.clientWidth || null);
+    const observer = new ResizeObserver((entries) => {
+      const measured = entries[entries.length - 1]?.contentRect.width;
+      measuredAreaWidthRef.current = measured ? Math.round(measured) : null;
+      runWhenLayoutSettled(applyAreaWidth);
     });
     observer.observe(parent);
-    setAvailablePanelAreaWidth(parent.clientWidth || null);
+    measuredAreaWidthRef.current = parent.clientWidth || null;
+    applyAreaWidth();
 
-    return () => observer.disconnect();
-  }, []);
+    return () => {
+      observer.disconnect();
+      cancelWhenLayoutSettled(applyAreaWidth);
+    };
+  }, [applyAreaWidth]);
+
+  // Expanding, or a surface wanting another width, may make the area matter.
+  React.useLayoutEffect(() => {
+    applyAreaWidth();
+  }, [applyAreaWidth, desiredWidth, isExpanded]);
 
   React.useEffect(() => {
     if (!isOpen || wasOpenRef.current) {
@@ -700,7 +719,6 @@ export const ContextPanel: React.FC = () => {
     // Apply the final width once, letting the regular 200ms width transition
     // carry the panel to the release position.
     const finalWidth = clampWidthForDrag(resizingWidthRef.current ?? width);
-    const availableWidth = resizeAvailableWidthRef.current;
     resizingWidthRef.current = null;
     resizeAvailableWidthRef.current = null;
     if (resizeFollowTimerRef.current !== null) {
@@ -711,7 +729,7 @@ export const ContextPanel: React.FC = () => {
     if (isTreeOnly) {
       setContextEditorTreeWidth(finalWidth);
     } else if (directoryKey && activeModeForWidth) {
-      setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth, availableWidth ?? undefined);
+      setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
     }
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
@@ -786,7 +804,9 @@ export const ContextPanel: React.FC = () => {
   }, [directoryKey, toggleContextPanelExpanded]);
 
   const handlePanelKeyDownCapture = React.useCallback((event: React.KeyboardEvent<HTMLElement>) => {
-    if (event.key !== 'Escape') {
+    // Closed, the slot holds only the work-status card, whose Escape is not
+    // the panel's to take.
+    if (event.key !== 'Escape' || !isOpen) {
       return;
     }
 
@@ -816,7 +836,7 @@ export const ContextPanel: React.FC = () => {
     event.preventDefault();
     event.stopPropagation();
     handleClose();
-  }, [handleClose]);
+  }, [handleClose, isOpen]);
 
   React.useEffect(() => {
     if (!directoryKey || !activeTab) {
@@ -1173,36 +1193,58 @@ export const ContextPanel: React.FC = () => {
     </header>
   );
 
-  // width/min/max stay interpolable across open/close (no instant min/max
-  // jumps) so the 200ms width transition matches the sidebars.
-  const panelStyle: React.CSSProperties = !isOpen
-    ? {
-        ['--oc-context-panel-width' as string]: `${width}px`,
-        width: 0,
-        maxWidth: '100%',
-        overflowX: 'clip',
-      }
+  // The right slot: this aside holds the context panel and the inline
+  // work-status card (rendered into the host below by ChatContainer), and
+  // animates one width for both (rightSlot.ts). Closed, it keeps the card's
+  // column when the card wants it and the chat is on screen; open, it is the
+  // panel's width. Every value stays interpolable across open/close (no
+  // instant min/max jumps).
+  const workStatusColumn = workStatusReserved && !chatCovered;
+  const expandedWidth = areaWidth !== null ? `${areaWidth}px` : '100%';
+  const slotWidth = !isOpen
+    ? (workStatusColumn ? `${WORK_STATUS_COLUMN_WIDTH}px` : '0px')
     : isExpanded
-      ? {
-          // px, not '100%': px↔% width changes do not interpolate, which
-          // would make the expand/collapse width snap instead of animating.
-          ['--oc-context-panel-width' as string]: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
-          width: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
-          maxWidth: '100%',
-        }
-      : {
-          width: 'min(var(--oc-context-panel-width), 100%)',
-          maxWidth: '100%',
-          overflowX: 'clip',
-          ['--oc-context-panel-width' as string]: `${width}px`,
-        };
+      // px, not '100%': px↔% width changes do not interpolate, which
+      // would make the expand/collapse width snap instead of animating.
+      ? expandedWidth
+      : 'min(var(--oc-context-panel-width), 100%)';
+
+  // What the user changed, as opposed to the slot following the window: a
+  // toggle, expanding, the card's column, another surface's or a dragged
+  // width. Only these animate as an announced layout animation; the chat area
+  // resizing (a window drag, a clamp) is tracked without one, so the work
+  // that waits for an animation's end is not held back for the whole drag.
+  const animationKey = `${isOpen}|${isExpanded}|${workStatusColumn}|${isOpen ? desiredWidth : ''}`;
+  const animationKeyRef = React.useRef(animationKey);
+  // A surface page covering or uncovering the chat moves the slot while the
+  // chat is not on screen: that change snaps.
+  const coveredRef = React.useRef(chatCovered);
+  const coverChanged = coveredRef.current !== chatCovered;
+  React.useLayoutEffect(() => {
+    coveredRef.current = chatCovered;
+  }, [chatCovered]);
+  React.useLayoutEffect(() => {
+    if (animationKeyRef.current === animationKey) return;
+    animationKeyRef.current = animationKey;
+    if (!coverChanged) beginLayoutAnimation(LAYOUT_ANIMATION_MS);
+  }, [animationKey, coverChanged]);
+
+  const panelStyle: React.CSSProperties = {
+    ['--oc-context-panel-width' as string]: isOpen && isExpanded ? expandedWidth : `${width}px`,
+    width: slotWidth,
+    maxWidth: '100%',
+    overflowX: isOpen && isExpanded ? undefined : 'clip',
+    transitionDuration: coverChanged ? '0ms' : `${LAYOUT_ANIMATION_MS}ms`,
+    transitionTimingFunction: LAYOUT_ANIMATION_EASING,
+  };
 
   return (
     <aside
       ref={panelRef}
       data-context-panel="true"
+      data-right-slot=""
+      data-context-panel-open={isOpen ? 'true' : 'false'}
       tabIndex={-1}
-      inert={!isOpen || undefined}
       className={cn(
         'flex min-h-0 flex-col overflow-hidden bg-background',
         // Right-anchored while expanded: `inset-0` would teleport the left
@@ -1211,13 +1253,14 @@ export const ContextPanel: React.FC = () => {
         isExpanded
           ? 'absolute inset-y-0 right-0 z-20 min-w-0'
           : 'relative h-full flex-shrink-0',
-        !isOpen && 'pointer-events-none',
-        'will-change-[width] motion-reduce:transition-none',
-        'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]'
+        'transition-[width] motion-reduce:transition-none',
       )}
       onKeyDownCapture={handlePanelKeyDownCapture}
       style={panelStyle}
     >
+      {/* The inline work-status card's host, right-anchored under the panel:
+          the card fades out while the panel fades in over it, and back. */}
+      <div ref={setWorkStatusHost} className={cn('absolute inset-y-0 right-0 z-0 flex', chatCovered && 'invisible')} />
       {/* Painted divider instead of border-l: a real border eats 1px of the
           content box only while collapsed, shifting the header controls by
           1px between the collapsed and expanded states. */}
@@ -1228,7 +1271,7 @@ export const ContextPanel: React.FC = () => {
       {isOpen && (
         <div aria-hidden="true" className="absolute right-0 top-0 z-40 h-full w-px bg-border" />
       )}
-      {!isExpanded && (
+      {isOpen && !isExpanded && (
         <div
           className={cn(
             'absolute left-0 top-0 z-50 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
@@ -1242,7 +1285,7 @@ export const ContextPanel: React.FC = () => {
       )}
       <div
         className={cn(
-          'relative z-10 flex h-full min-h-0 shrink-0 flex-col duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+          'relative z-10 flex h-full min-h-0 shrink-0 flex-col bg-background motion-reduce:transition-none',
           // Width animates in sync with the panel (surface switches, resize
           // release); during the drag itself nothing resizes — only the ghost
           // guide line moves.
@@ -1252,11 +1295,12 @@ export const ContextPanel: React.FC = () => {
         // px in the expanded state too: px↔% width changes cannot interpolate,
         // so the header controls would snap instead of riding the animation.
         style={{
-          width: isExpanded
-            ? (availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%')
-            : 'var(--oc-context-panel-width)',
+          width: isExpanded ? expandedWidth : 'var(--oc-context-panel-width)',
+          transitionDuration: `${LAYOUT_ANIMATION_MS}ms`,
+          transitionTimingFunction: LAYOUT_ANIMATION_EASING,
         }}
         aria-hidden={!isOpen}
+        inert={!isOpen || undefined}
       >
       {header}
       <div className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>

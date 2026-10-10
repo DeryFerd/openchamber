@@ -2,6 +2,7 @@ import React from 'react';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
+import { cancelWhenLayoutSettled, isLayoutAnimating, onLayoutAnimationStart, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import { createKeyboardFollowGlide, type KeyboardFollowGlide } from '@/components/chat/lib/scroll/keyboardFollowGlide';
 import { retireScrollContent } from '@/components/chat/lib/scroll/retireScrollContent';
 import {
@@ -284,6 +285,9 @@ export const useChatTimelineScroll = ({
 
     const modeRef = React.useRef<TimelineScrollMode>('following-end');
     const isAtEndRef = React.useRef(true);
+    // Set while a side-column width animation runs that started with the
+    // reader pinned at the end (see the pinned-end section).
+    const pinnedThroughAnimationRef = React.useRef(false);
     // Incremented by every real user gesture. Automatic movement is only valid
     // while `liveFollowGenerationRef` still equals it.
     const userGenerationRef = React.useRef(0);
@@ -721,6 +725,10 @@ export const useChatTimelineScroll = ({
         // Mid-glide the viewport trails the end by design; the glide lands on
         // it, so a "left the end" report here is not a reader leaving.
         if (!isAtEnd && followGlideHeld()) return;
+        // Mid-animation the rows re-wrap behind lagging list sizes and the
+        // browser clamps scrollTop as the chat widens; a pinned reader has not
+        // left the end, and the end is asserted once the animation settles.
+        if (!isAtEnd && pinnedThroughAnimationRef.current) return;
         if (isAtEndRef.current === isAtEnd) return;
         isAtEndRef.current = isAtEnd;
         setIsPinned(isAtEnd);
@@ -1237,6 +1245,14 @@ export const useChatTimelineScroll = ({
         const pin = () => {
             if (userOwnsScrollRef.current || !isAtEndRef.current || modeRef.current !== 'following-end') return;
             if (followGlideHeld()) return;
+            // A side column is animating its width: the rows re-wrap on every
+            // frame, and pinning each one forced a transcript layout per frame
+            // (plus a second one from the scroll event it caused). The end is
+            // asserted once, at the final width.
+            if (isLayoutAnimating()) {
+                runWhenLayoutSettled(pin);
+                return;
+            }
             if (widthResizingRef.current) {
                 // Re-wrapping rows: the scroll node's scrollHeight carries the
                 // list's stale total, so the end is the measured bottom of the
@@ -1296,8 +1312,46 @@ export const useChatTimelineScroll = ({
             mutations.disconnect();
             resizes?.disconnect();
             scrollNode.removeEventListener('scrollend', landed);
+            cancelWhenLayoutSettled(pin);
         };
     }, [followEnd, pinEndAtRest, scrollNode]);
+
+    // A side-column animation that starts with the reader pinned at the end
+    // keeps them there: "left the end" reports during it are ignored (above),
+    // and when it settles, unless the reader scrolled meanwhile, the measured
+    // end of the last real row is asserted again.
+    React.useEffect(() => {
+        if (!scrollNode) return;
+        let startGeneration = 0;
+        const settle = () => {
+            if (!pinnedThroughAnimationRef.current) return;
+            pinnedThroughAnimationRef.current = false;
+            if (userGenerationRef.current !== startGeneration || userOwnsScrollRef.current) return;
+            isAtEndRef.current = true;
+            modeRef.current = 'following-end';
+            const state = listRef.current?.getState();
+            const offset = state
+                ? resolveRealContentEndOffset({
+                    state,
+                    composerOverlayHeight: composerOverlayHeightRef.current,
+                    footerSize: listFooterSizeRef.current,
+                })
+                : null;
+            const end = offset ?? scrollNode.scrollHeight - scrollNode.clientHeight;
+            if (Math.abs(end - scrollNode.scrollTop) > 1) scrollNode.scrollTop = end;
+        };
+        const release = onLayoutAnimationStart(() => {
+            if (userOwnsScrollRef.current || !isAtEndRef.current || modeRef.current !== 'following-end') return;
+            pinnedThroughAnimationRef.current = true;
+            startGeneration = userGenerationRef.current;
+            runWhenLayoutSettled(settle);
+        });
+        return () => {
+            release();
+            cancelWhenLayoutSettled(settle);
+            pinnedThroughAnimationRef.current = false;
+        };
+    }, [scrollNode]);
 
     // A burst reply can end with part of its tail hidden and nothing left to
     // grow, so no pin would run: once the session stops working (and a send's

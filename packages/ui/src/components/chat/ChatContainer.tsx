@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import type { Message, Part, Session } from '@/lib/opencode/model';
 import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
 import { keepCommandSubagentReports } from '@/lib/opencode/subagent-run';
@@ -98,6 +99,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts
 import { ChatSearchBar } from './search/ChatSearchBar';
 import { WorkStatusPanel } from './work-status/WorkStatusPanel';
 import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
+import { useRightSlotStore } from '@/components/layout/rightSlot';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
 import { PermissionDock } from './PermissionDock';
@@ -1036,7 +1038,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // It yields to the context panel and to a narrow chat; `rowRef` goes on the
     // row that holds both columns, so its width never depends on the panel's
     // own visibility.
-    const { rowRef: workStatusRowRef, visible: workStatusVisible, fits: workStatusFits } = useWorkStatusVisibility({
+    const { rowRef: workStatusRowRef, visible: workStatusVisible, fits: workStatusFits, roomy: workStatusRoomy } = useWorkStatusVisibility({
         isMobile,
         isVSCode,
     });
@@ -1053,6 +1055,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         && !pinned
         && chatSurfaceMode !== 'mini-chat';
     const showWorkStatusPanel = workStatusPanelMountable && workStatusVisible;
+    // The inline card renders in the right slot beside the chat, which owns
+    // the one width animation for the card and the context panel together
+    // (components/layout/rightSlot.ts).
+    const workStatusHost = useRightSlotStore((state) => state.workStatusHost);
 
     // Offered over the chat when there is no room beside it. The panel is still
     // switched on; only the layout refuses it.
@@ -1064,6 +1070,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const workStatusOverlayMountable = workStatusPanelMountable
         && workStatusPanelEnabled
         && !workStatusFits;
+    // The slot keeps the card's column while the context panel covers it.
+    const workStatusReserved = workStatusPanelMountable && workStatusPanelEnabled && workStatusRoomy;
     const showWorkStatusOverlay = workStatusOverlayMountable && workStatusOverlayOpen;
 
     React.useEffect(() => {
@@ -1423,8 +1431,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         const container = scrollRef.current;
         if (!container) return;
 
+        // Read by the transcript's sticky user messages, which inherit it from
+        // here: a new value restyles the transcript, so it is written only when
+        // the height changed.
         const updateChatScrollHeight = () => {
-            container.style.setProperty('--chat-scroll-height', `${container.clientHeight}px`);
+            const value = `${container.clientHeight}px`;
+            if (container.style.getPropertyValue('--chat-scroll-height') !== value) {
+                container.style.setProperty('--chat-scroll-height', value);
+            }
         };
 
         updateChatScrollHeight();
@@ -1446,7 +1460,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             };
         }
 
-        const resizeObserver = new ResizeObserver(scheduleUpdate);
+        // A width change (the sidebar or the context panel animating) leaves
+        // the height alone; it is skipped before anything reads layout. Inside
+        // the callback layout is current, so the read forces none.
+        let observedHeight: number | null = null;
+        const resizeObserver = new ResizeObserver((entries) => {
+            const height = entries[entries.length - 1]?.contentRect.height;
+            if (height === undefined || height === observedHeight) return;
+            observedHeight = height;
+            updateChatScrollHeight();
+        });
         resizeObserver.observe(container);
 
         return () => {
@@ -1960,16 +1983,18 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         </ChatColumnExpandedInputContext.Provider>
         </ChatColumnActionsContext.Provider>
         </ChatColumnSessionContext.Provider>
-        {/* Kept mounted while it could ever show, so it can animate its own
-            collapse; `visible` drives that. Unmounting on the spot is what made
-            the chat jump wide before easing narrow again. */}
-        {workStatusPanelMountable ? (
+        {/* Kept mounted while it could ever show, so it can fade out and back
+            in; `visible` drives that, and `reserved` keeps its column in the
+            right slot while the context panel covers it. */}
+        {workStatusPanelMountable && workStatusHost ? createPortal(
             <WorkStatusPanel
                 visible={showWorkStatusPanel}
+                reserved={workStatusReserved}
                 sessionId={currentSessionId ?? null}
                 directory={workStatusDirectory ?? null}
                 repositoryEnabled={!isManagedChatContext}
-            />
+            />,
+            workStatusHost,
         ) : null}
         </div>
     );

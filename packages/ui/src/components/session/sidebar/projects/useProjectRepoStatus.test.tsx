@@ -16,9 +16,10 @@ const project = (id: string, extra: Partial<Project> = {}): Project => ({ id, pa
 const noRepoStatus = new Map<string, { isGitRepo: boolean | null; branch: string | null }>();
 const ignore = () => undefined;
 
-const Probe: React.FC<{ projects: Project[] }> = ({ projects }) => {
+const Probe: React.FC<{ projects: Project[]; enabled?: boolean }> = ({ projects, enabled = true }) => {
   useProjectRepoStatus({
     normalizedProjects: projects,
+    enabled,
     gitRepoStatus: noRepoStatus,
     setProjectRepoStatus: ignore,
     setProjectRootBranches: ignore,
@@ -59,10 +60,10 @@ describe('useProjectRepoStatus', () => {
     dom.restore();
   });
 
-  const render = (projects: Project[]) => act(async () => {
+  const render = (projects: Project[], enabled = true) => act(async () => {
     root.render(
       <RuntimeAPIContext.Provider value={runtimeAPIs}>
-        <Probe projects={projects} />
+        <Probe projects={projects} enabled={enabled} />
       </RuntimeAPIContext.Provider>,
     );
   });
@@ -78,6 +79,21 @@ describe('useProjectRepoStatus', () => {
 
     await render([project('a'), project('b'), project('c')]);
     expect(reads).toEqual(['/a', '/b', '/c']);
+  });
+
+  test('hidden it reads nothing and keeps its paths; shown again it re-ensures each known path once', async () => {
+    await render([project('a'), project('b')]);
+    expect(reads).toEqual(['/a', '/b']);
+
+    await render([project('a'), project('b')], false);
+    await render([project('a', { sidebarCollapsed: true }), project('b')], false);
+    expect(reads).toEqual(['/a', '/b']);
+
+    // ensureStatus itself skips a path read within its staleness window.
+    await render([project('a'), project('b')]);
+    expect(reads).toEqual(['/a', '/b', '/a', '/b']);
+    await render([project('a'), project('b')]);
+    expect(reads).toEqual(['/a', '/b', '/a', '/b']);
   });
 
   test('a failed read is retried on the next list change; a removed and re-added project is read again', async () => {

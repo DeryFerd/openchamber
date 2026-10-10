@@ -4,6 +4,7 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { beginLayoutAnimation, LAYOUT_ANIMATION_EASING, LAYOUT_ANIMATION_MS, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 
 const SIDEBAR_CONTENT_WIDTH = 280;
 // Wide enough for the toolbar's eight icons and a labelled titlebar button.
@@ -69,17 +70,39 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
     );
     const appliedWidth = isOpen ? openWidth : 0;
     const currentWidth = isResizing ? (resizingWidthRef.current ?? appliedWidth) : appliedWidth;
+    const publishedWidth = isResizing ? currentWidth : openWidth;
 
     // The titlebar overlay that floats above the sidebar is a sibling of it, not
     // a child, so it cannot read the width published on <aside>. Publish it on
     // the root as well, the way --oc-header-height and --oc-titlebar-left-inset
-    // already are, so the overlay can cap itself to the sidebar.
+    // already are, so the overlay can cap itself to the sidebar. It is the open
+    // width, which a toggle leaves alone: a new value on the root restyles the
+    // whole document.
     React.useEffect(() => {
-        document.documentElement.style.setProperty(
-            '--oc-left-sidebar-width',
-            `${isResizing ? currentWidth : openWidth}px`,
-        );
-    }, [currentWidth, isResizing, openWidth]);
+        document.documentElement.style.setProperty('--oc-left-sidebar-width', `${publishedWidth}px`);
+    }, [publishedWidth]);
+
+    // The session list stays mounted while the sidebar is closed, so opening it
+    // does not build the list again. Once the close animation has finished its
+    // content is skipped by rendering (`content-visibility: hidden`); it is
+    // shown again in the frame the sidebar starts to open.
+    const [contentSkipped, setContentSkipped] = React.useState(!isOpen);
+    if (isOpen && contentSkipped) {
+        setContentSkipped(false);
+    }
+    const isOpenRef = React.useRef(isOpen);
+    const previousOpenRef = React.useRef(isOpen);
+    React.useLayoutEffect(() => {
+        isOpenRef.current = isOpen;
+        if (previousOpenRef.current === isOpen) return;
+        previousOpenRef.current = isOpen;
+        beginLayoutAnimation(LAYOUT_ANIMATION_MS);
+        if (!isOpen) {
+            runWhenLayoutSettled(() => {
+                if (!isOpenRef.current) setContentSkipped(true);
+            });
+        }
+    }, [isOpen]);
 
     if (isMobile) {
         return null;
@@ -141,8 +164,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
     return (
         <aside
             ref={sidebarRef}
+            data-left-sidebar=""
             className={cn(
-                'relative flex h-full overflow-hidden border-r border-border will-change-[width] motion-reduce:transition-none',
+                'relative flex h-full overflow-hidden border-r border-border',
+                // In the class, not the inline style: an inline transition
+                // outranked `motion-reduce:transition-none`, so the sidebar
+                // still animated for readers who asked for reduced motion.
+                isResizing ? 'transition-none' : 'transition-[width,min-width,max-width] motion-reduce:transition-none',
                 'bg-sidebar',
                 !isOpen && 'border-r-0',
                 className,
@@ -151,11 +179,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 width: `${currentWidth}px`,
                 minWidth: `${currentWidth}px`,
                 maxWidth: `${currentWidth}px`,
-                ['--oc-left-sidebar-width' as string]: `${isResizing ? currentWidth : openWidth}px`,
+                ['--oc-left-sidebar-width' as string]: `${publishedWidth}px`,
                 overflowX: 'clip',
-                transitionProperty: isResizing ? 'none' : 'width, min-width, max-width',
-                transitionDuration: '200ms',
-                transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+                transitionDuration: `${LAYOUT_ANIMATION_MS}ms`,
+                transitionTimingFunction: LAYOUT_ANIMATION_EASING,
             }}
             aria-hidden={!isOpen || appliedWidth === 0}
         >
@@ -182,12 +209,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             )}
             <div
                 className={cn(
-                    'relative z-10 flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+                    'relative z-10 flex h-full shrink-0 flex-col transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
                     isResizing && 'pointer-events-none',
                     !isOpen && 'pointer-events-none select-none opacity-0'
                 )}
-                style={{ width: 'var(--oc-left-sidebar-width)', overflowX: 'hidden' }}
+                style={{
+                    width: 'var(--oc-left-sidebar-width)',
+                    overflowX: 'hidden',
+                    contentVisibility: contentSkipped ? 'hidden' : undefined,
+                }}
                 aria-hidden={!isOpen}
+                inert={!isOpen || undefined}
             >
                 {topBar}
                 <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal>

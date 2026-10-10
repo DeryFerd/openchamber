@@ -1,4 +1,5 @@
 import React from 'react';
+import { titlebarControlsWidthReaderRef } from './titlebarControlsWidth';
 
 /**
  * Strip at the top of the desktop left sidebar that reserves room for the
@@ -25,6 +26,7 @@ export const SidebarTopBar: React.FC = () => (
     />
     {/* No-drag carve under the overlay buttons so they stay clickable. */}
     <div
+      ref={titlebarControlsWidthReaderRef}
       className="app-region-no-drag shrink-0"
       style={{ width: 'calc(var(--oc-titlebar-controls-width, 5.5rem) + 0.5rem)' }}
     />

@@ -20,11 +20,17 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one
   does — they must not disappear while in use.
-- `defaultWidthFraction` is the panel width as a fraction of the content area,
-  used until the user manually resizes that surface. Manual widths are stored
-  per mode in `useUIStore.contextPanelByDirectory[dir].widthFractionByMode`;
-  `widthByMode` retains the last pixel size until the available area is known.
-  Every surface, including walkthrough, restores both values on reload.
+- `defaultWidth` is the panel width in px, used until the user resizes that
+  surface (640 for the wide surfaces, 540 for most, 480 for Git; guest panels
+  540). A resize is remembered in px per mode in
+  `useUIStore.contextPanelByDirectory[dir].widthByMode` and restored on reload.
+  The width does not follow the chat area: a sidebar toggle or a window resize
+  leaves it alone, and it only narrows when it would leave the chat less than
+  its minimum column. `ContextPanel` keeps the chat area's width as state only
+  while it decides something (expanded, or that ceiling binds), and applies a
+  change that arrives during a side-column animation once it ends. Older
+  builds also stored `widthFractionByMode`; hydration ignores it and keeps the
+  pixel width the same resize stored.
   The file surface stores its full editor width under `file`. Without an
   editor, the panel uses `contextEditorTreeWidth`, the same pixel width as the
   docked file tree. Resizing the tree-only panel updates that shared tree width

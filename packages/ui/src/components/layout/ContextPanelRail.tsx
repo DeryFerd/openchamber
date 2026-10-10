@@ -107,6 +107,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             onClick={() => onSelect(surface)}
             aria-label={badgeAriaLabel ?? label}
             aria-pressed={isActive}
+            data-context-surface={surface.id}
             className={cn(
               'flex h-9 w-9 touch-none select-none items-center justify-center rounded-md transition-colors',
               isActive

@@ -25,6 +25,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 import { useSessionListSync } from '@/components/session/sidebar/list/useSessionListSync';
+import { setChatCovered } from './rightSlot';
 
 import { ChatView } from '@/components/views/ChatView';
 
@@ -60,6 +61,26 @@ const OnDemand: React.FC<{
 };
 
 /**
+ * The session sidebar, the only part of the layout that follows its open
+ * state: toggling it re-renders this, never the chat, the header row or the
+ * context panel beside it.
+ */
+const LeftSidebar = React.memo<{ isMobile: boolean }>(({ isMobile }) => {
+    const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
+    return (
+        <Sidebar
+            isOpen={isSidebarOpen}
+            isMobile={isMobile}
+            className="border-border"
+            topBar={<SidebarTopBar />}
+        >
+            <SessionSidebar isVisible={isSidebarOpen} />
+        </Sidebar>
+    );
+});
+LeftSidebar.displayName = 'LeftSidebar';
+
+/**
  * Desktop-surface layout: the chat owns the main area, and every other
  * surface (git, diff, files, terminal, ...) opens in the ContextPanel via the
  * rail. Phone-sized viewports run the separate MobileApp shell — a viewport
@@ -68,7 +89,6 @@ const OnDemand: React.FC<{
 export const MainLayout: React.FC = () => {
     useSessionListSync({ isVSCode: false });
     useTerminalSessionKeepalive();
-    const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     // The grant dialog of isolated spaces; the main layout is never VS Code's (decision 16).
     const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
     const setIsMobile = useUIStore((state) => state.setIsMobile);
@@ -104,6 +124,12 @@ export const MainLayout: React.FC = () => {
     // fully hidden (not just covered) so none of its floating chrome bleeds
     // through, and selecting a session or draft anywhere closes the surface.
     const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || isUsageStatsPageOpen || isSourceBoardOpen || Boolean(worktreesPageProjectId) || isSpacesPageOpen || isRunOverviewOpen || Boolean(guestPage);
+    // The work-status card sits in the right slot, outside the hidden chat,
+    // so the slot is told to hide it with the chat.
+    React.useLayoutEffect(() => {
+        setChatCovered(isSurfacePageOpen);
+    }, [isSurfacePageOpen]);
+    React.useEffect(() => () => setChatCovered(false), []);
 
     React.useEffect(() => {
         const closeSurfacePages = () => useUIStore.getState().closeMainSurfaces();
@@ -156,14 +182,7 @@ export const MainLayout: React.FC = () => {
                 <TitlebarLeftControls />
                 {/* Full-height Sidebar beside [Header above (chat | RightSidebar)] */}
                 <div className="flex flex-1 overflow-hidden" data-page-scroll-lock="true">
-                    <Sidebar
-                        isOpen={isSidebarOpen}
-                        isMobile={isMobile}
-                        className="border-border"
-                        topBar={<SidebarTopBar />}
-                    >
-                        <SessionSidebar isVisible={isSidebarOpen} />
-                    </Sidebar>
+                    <LeftSidebar isMobile={isMobile} />
                     <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
                         <Header />
                         <div className="relative flex flex-1 min-h-0 overflow-hidden bg-background" data-page-scroll-lock="true">

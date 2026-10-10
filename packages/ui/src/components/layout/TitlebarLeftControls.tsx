@@ -9,6 +9,7 @@ import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControl
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { invokeDesktop } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
+import { publishTitlebarControlsWidth } from './titlebarControlsWidth';
 
 const ICON_BUTTON_CLASS =
   'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-interactive-hover transition-colors';
@@ -22,7 +23,8 @@ const ICON_BUTTON_CLASS =
  * a fixed control cluster instead. Its height tracks `--oc-header-height` and
  * its left padding clears the OS window controls via `--oc-titlebar-left-inset`.
  * The cluster's measured width is published as `--oc-titlebar-controls-width`
- * so the header can reserve matching space when the sidebar is collapsed.
+ * onto the elements that reserve room for it (`titlebarControlsWidth.ts`), so
+ * the header can reserve matching space when the sidebar is collapsed.
  */
 export const TitlebarLeftControls: React.FC = () => {
   const { t, locale } = useI18n();
@@ -64,7 +66,7 @@ export const TitlebarLeftControls: React.FC = () => {
       // Prefer scrollWidth so negative child margins / overflow cannot under-report
       // the space the overlay actually occupies over the header.
       const width = Math.max(node.getBoundingClientRect().width, node.scrollWidth);
-      document.documentElement.style.setProperty('--oc-titlebar-controls-width', `${Math.round(width)}px`);
+      publishTitlebarControlsWidth(width);
     };
 
     publishWidth();
@@ -126,6 +128,7 @@ export const TitlebarLeftControls: React.FC = () => {
             <button
               type="button"
               onClick={toggleSidebar}
+              data-sidebar-toggle=""
               aria-label={t('header.actions.openSessionsAria')}
               className={cn(ICON_BUTTON_CLASS, 'shrink-0')}
             >

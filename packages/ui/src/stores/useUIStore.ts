@@ -29,9 +29,10 @@ export const clampContextEditorTreeWidth = (width: number): number =>
   Math.min(480, Math.max(200, Math.round(width)));
 
 const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'plan', 'chat', 'browser', 'git', 'pr', 'notes', 'terminal']);
+// Older builds also stored `widthFractionByMode` (a share of the chat area);
+// it is ignored, and the pixel width the same resize stored is used.
 const persistedPanelWidthsSchema = z.object({
   widthByMode: z.record(z.string(), z.number().finite().optional().catch(undefined)).catch({}),
-  widthFractionByMode: z.record(z.string(), z.number().positive().max(1).optional().catch(undefined)).catch({}),
 });
 type MermaidRenderingMode = 'svg' | 'ascii';
 type UserMessageRenderingMode = 'markdown' | 'plain';
@@ -110,12 +111,9 @@ type ContextPanelDirectoryState = {
   expanded: boolean;
   tabs: ContextPanelTab[];
   activeTabId: string | null;
-  // Legacy pixel widths and the last resize value, used until the panel's
-  // available area is known and a responsive ratio can be captured.
+  // The width the user resized each surface to, px. A surface without one
+  // opens at its registry default (`getContextSurfaceDefaultWidth`).
   widthByMode: Partial<Record<ContextPanelMode, number>>;
-  // Ratios captured when a user resizes a surface. These remain responsive
-  // across window sizes while widthByMode preserves older persisted values.
-  widthFractionByMode: Partial<Record<ContextPanelMode, number>>;
   touchedAt: number;
 };
 
@@ -171,10 +169,9 @@ const isLegacyDefaultTemplates = (value: unknown): boolean => {
 
 const CONTEXT_PANEL_DEFAULT_WIDTH = 380;
 const CONTEXT_PANEL_MIN_WIDTH = 320;
-/** Persistence sanity bound only: the real ceiling is responsive
- * (widthFractionByMode, capped by available area minus a minimum chat
- * width in ContextPanel), so a wide monitor may legitimately store a
- * width far beyond any fixed pixel value. */
+/** Persistence sanity bound only: the real ceiling is the available area
+ * minus a minimum chat width in ContextPanel, so a wide monitor may
+ * legitimately store a width far beyond any fixed pixel value. */
 const CONTEXT_PANEL_MAX_PERSISTED_WIDTH = 10000;
 /** Per surface, not per panel: see clampContextPanelTabs. */
 const CONTEXT_PANEL_MAX_TABS = 12;
@@ -504,7 +501,6 @@ const touchContextPanelState = (prev?: ContextPanelDirectoryState): ContextPanel
     tabs: [],
     activeTabId: null,
     widthByMode: {},
-    widthFractionByMode: {},
     touchedAt: Date.now(),
   };
 };
@@ -769,13 +765,10 @@ const sanitizeContextPanelByDirectory = (
     // Legacy single `width` values are intentionally dropped: widths are now
     // per-surface, seeded from registry defaults until the user resizes.
     const widthByMode: Partial<Record<ContextPanelMode, number>> = {};
-    const widthFractionByMode: Partial<Record<ContextPanelMode, number>> = {};
     const savedWidths = persistedPanelWidthsSchema.parse(rawState);
     for (const mode of contextPanelModeSchema.options) {
       const pixels = savedWidths.widthByMode[mode];
-      const fraction = savedWidths.widthFractionByMode[mode];
       if (pixels !== undefined) widthByMode[mode] = clampContextPanelWidth(pixels);
-      if (fraction !== undefined) widthFractionByMode[mode] = fraction;
     }
 
     next[directory] = {
@@ -784,7 +777,6 @@ const sanitizeContextPanelByDirectory = (
       tabs: clampedTabs,
       activeTabId: resolveActiveContextPanelTabID(clampedTabs, resolvedActiveTabId),
       widthByMode,
-      widthFractionByMode,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -1137,7 +1129,7 @@ interface UIStore {
   closeContextPanelTabs: (directory: string, tabIds: readonly string[]) => void;
   closeContextPanel: (directory: string) => void;
   toggleContextPanelExpanded: (directory: string) => void;
-  setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number, availableWidth?: number) => void;
+  setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number) => void;
   setNotesPanelHeight: (height: number) => void;
   setWorkStatusSectionExpanded: (sectionId: string, expanded: boolean) => void;
   setMessageQueueExpanded: (expanded: boolean) => void;
@@ -2026,7 +2018,7 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        setContextPanelWidth: (directory, mode, width, availableWidth) => {
+        setContextPanelWidth: (directory, mode, width) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory) {
             return;
@@ -2036,12 +2028,6 @@ export const useUIStore = create<UIStore>()(
             const prev = state.contextPanelByDirectory[normalizedDirectory];
             const current = touchContextPanelState(prev);
             const clampedWidth = clampContextPanelWidth(width);
-            const widthFractionByMode = { ...current.widthFractionByMode };
-            if (availableWidth !== undefined && Number.isFinite(availableWidth) && availableWidth > 0) {
-              widthFractionByMode[mode] = Math.min(1, clampedWidth / availableWidth);
-            } else {
-              delete widthFractionByMode[mode];
-            }
             const byDirectory = {
               ...state.contextPanelByDirectory,
               [normalizedDirectory]: {
@@ -2050,7 +2036,6 @@ export const useUIStore = create<UIStore>()(
                   ...current.widthByMode,
                   [mode]: clampedWidth,
                 },
-                widthFractionByMode,
               },
             };
 

@@ -5,6 +5,8 @@ import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/useUIStore';
 import { WORK_STATUS_PANEL_WIDTH } from './useWorkStatusVisibility';
+import { setWorkStatusReserved } from '@/components/layout/rightSlot';
+import { LAYOUT_ANIMATION_EASING, LAYOUT_ANIMATION_MS } from '@/lib/layoutAnimation';
 import { WorkStatusGoalRow } from './WorkStatusGoalRow';
 import { WorkStatusPrimaryGroup } from './WorkStatusPrimaryGroup';
 import { WorkStatusUsageSection } from './WorkStatusUsageSection';
@@ -33,8 +35,14 @@ type Props = {
   directory: string | null;
   /** Managed Chats have no project repository, even if another project remains active. */
   repositoryEnabled?: boolean;
-  /** Whether the panel should currently occupy space. */
+  /** Whether the panel should currently be shown. */
   visible: boolean;
+  /**
+   * Inline only: the right slot keeps the card's column (see
+   * `components/layout/rightSlot.ts`). True while the context panel covers
+   * the card too, so closing the panel goes straight back to the card.
+   */
+  reserved?: boolean;
   /**
    * Floats over the transcript instead of sitting beside it, for when the chat
    * is too narrow to give it a column of its own.
@@ -43,16 +51,13 @@ type Props = {
 };
 
 /**
- * Matches the context panel's own width animation exactly.
- *
- * The two are siblings of the transcript, and opening the context panel hides
- * this one. With an instant unmount the chat first jumped wider (this panel
- * gone) and then eased narrower (the context panel expanding) — two opposite
- * width changes in a row, which reads as a flutter. Collapsing on the same
- * curve and duration makes the chat's width move once, in one direction.
+ * The inline card lives in the right slot with the context panel, and the
+ * slot animates the width (`components/layout/rightSlot.ts`): the card itself
+ * keeps its width and only fades, on the slot's duration and curve, while the
+ * context panel fades in over it. The overlay fades and lifts.
  */
-const PANEL_TRANSITION_MS = 200;
-const PANEL_TRANSITION_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
+const PANEL_TRANSITION_MS = LAYOUT_ANIMATION_MS;
+const PANEL_TRANSITION_EASING = LAYOUT_ANIMATION_EASING;
 
 /**
  * Work-status panel: a card inside the chat column reporting the state of the
@@ -68,7 +73,7 @@ const PANEL_TRANSITION_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
  * eat a visible slice of every row's trailing value, and the shadows already
  * say there is more to see.
  */
-export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, repositoryEnabled = true, overlay = false }) => {
+export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, reserved = false, repositoryEnabled = true, overlay = false }) => {
   const { t } = useI18n();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
   const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
@@ -114,11 +119,25 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   React.useEffect(() => {
     if (visible) {
       setContentMounted(true);
+      // Optimistic again, as on first mount: the sections left the presence
+      // count when they unmounted, and reading that as "nothing to show"
+      // would give the card's column back for the frames before they report.
+      setRenderedSections((count) => Math.max(count, 1));
       return undefined;
     }
     const timer = window.setTimeout(() => setContentMounted(false), PANEL_TRANSITION_MS);
     return () => window.clearTimeout(timer);
   }, [visible]);
+
+  // Tells the right slot whether to keep the card's column. A card whose
+  // sections all reported nothing gives it back, as its collapse did before.
+  const empty = contentMounted && renderedSections === 0 && !allSectionsHidden;
+  const wantsColumn = !overlay && reserved && !empty;
+  React.useLayoutEffect(() => {
+    if (overlay) return undefined;
+    setWorkStatusReserved(wantsColumn);
+    return () => setWorkStatusReserved(false);
+  }, [overlay, wantsColumn]);
 
   const restore = React.useCallback((node: HTMLElement | null) => {
     if (!node) return;
@@ -204,9 +223,8 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // overflowing the chat.
         // A left margin as well as a right one: flush against the transcript
         // the card's own shadow had no room and was clipped down that edge.
-        'relative my-4 flex shrink-0 flex-col self-start overflow-hidden',
+        'relative my-4 ml-2 mr-4 flex shrink-0 flex-col self-start overflow-hidden',
         'max-h-[calc(100%-2rem)]',
-        interactive ? 'ml-2 mr-4' : 'ml-0 mr-0',
         // Out of the flow entirely, anchored to the chat column's top-right so
         // it reads as a dropdown from the header button. As a flex child it
         // took part in the layout and pushed the transcript, which is the one
@@ -227,20 +245,15 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         'shadow-[0_2px_8px_-3px_rgb(0_0_0_/_0.08)]',
       )}
       style={{
-        // The overlay keeps its width: it takes no space from the chat, so
-        // collapsing it would animate a dimension nothing depends on. It fades
-        // and lifts instead, like the dropdown it reads as.
-        width: overlay || interactive ? WORK_STATUS_PANEL_WIDTH : 0,
+        // Neither form animates its width: inline, the right slot around the
+        // card does; the overlay takes no space from the chat. The overlay
+        // fades and lifts, like the dropdown it reads as; inline, the card
+        // only fades.
+        width: WORK_STATUS_PANEL_WIDTH,
         opacity: interactive ? 1 : 0,
-        transform: visible
-          ? 'translateY(0) scale(1)'
-          : overlay
-            ? 'translateY(-6px) scale(0.98)'
-            // Inline: leaves to the right and arrives from it, so the card
-            // reads as sliding out past the window edge.
-            : `translateX(${WORK_STATUS_PANEL_WIDTH / 4}px)`,
+        transform: overlay ? (visible ? 'translateY(0) scale(1)' : 'translateY(-6px) scale(0.98)') : undefined,
         transformOrigin: 'top right',
-        transitionProperty: 'width, opacity, transform, margin',
+        transitionProperty: overlay ? 'opacity, transform' : 'opacity',
         transitionDuration: `${PANEL_TRANSITION_MS}ms`,
         transitionTimingFunction: PANEL_TRANSITION_EASING,
         pointerEvents: interactive ? undefined : 'none',

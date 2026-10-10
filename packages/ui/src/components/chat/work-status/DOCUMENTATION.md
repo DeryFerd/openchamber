@@ -1,7 +1,7 @@
 # Work-status panel
 
-A card rendered to the right of the transcript inside `ChatContainer`. It
-reports the state of the current session, its branch, its quotas and its
+A card rendered to the right of the transcript, in the right slot it shares
+with the context panel. It reports the state of the current session, its branch, its quotas and its
 subagents.
 
 ## Structure
@@ -31,14 +31,20 @@ the inline card keeps its lighter, non-blurred fill instead.
 
 ## Placement
 
-`ChatContainer`'s top-level return is a flex row:
+`ChatContainer` owns the card's state, but the inline card renders through a
+portal into the right slot (`components/layout/rightSlot.ts`): the context
+panel's `aside` in `MainLayout`, which holds a right-anchored host for the card
+under the panel's content. The slot animates one width for both, from the
+card's column (`WORK_STATUS_COLUMN_WIDTH`, the card and its margins) to the
+panel's width and back, while the card fades out and the panel fades in over
+it. The chat column therefore narrows or widens once, in one direction.
 
-- the existing chat column (`data-composer-bound`, `flex-1 min-w-0`), holding
-  the viewport, the composer and the timeline dialog;
-- `WorkStatusPanel`, a fixed-width `shrink-0` sibling.
+The card tells the slot whether it wants its column through `reserved`:
+switched on, room beside the chat (`roomy`, see below), and something to
+show. It stays reserved while the context panel covers it, so closing the
+panel goes straight back to the card's column instead of to nothing first.
 
-Nothing inside `ChatViewport` changed. The virtualizer sees the column shrink
-exactly as it already does when the context panel opens.
+The overlay form stays inside the chat column in `ChatContainer`.
 
 ## Visibility
 
@@ -52,7 +58,9 @@ exactly as it already does when the context panel opens.
   directory this panel reports about: a managed Chat reports about none, and
   that empty key answered "closed" for a context panel that was plainly open;
 - the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` of transcript alongside
-  `WORK_STATUS_PANEL_WIDTH` of panel.
+  `WORK_STATUS_PANEL_WIDTH` of panel. Only that threshold decision is state
+  (`roomy`); the width itself is not, because it changes on every frame of a
+  sidebar animation and storing it re-rendered the whole chat each frame.
 
 `ChatContainer` additionally suppresses it in mini-chat and in expanded-input
 mode. It remains available on a new-session draft: when the draft targets a
@@ -377,10 +385,13 @@ describes the current frame, not a preference.
 
 ## Appearing and disappearing
 
-The panel collapses on the context panel's own curve and duration rather than
-unmounting, and slides out to the right with a fade when switched off. It stays
-mounted wherever it could ever show, so the collapse has something to animate;
-its content is dropped once the collapse finishes.
+The card keeps its width and only fades, on the slot's duration and curve
+(`LAYOUT_ANIMATION_MS`, ease-out); the slot animates the width. It stays
+mounted wherever it could ever show, so the fade has something to animate;
+its content is dropped once the fade finishes. A card whose sections all
+reported nothing gives its column back. When it is shown again the presence
+count starts optimistic, as on first mount, so the column is not given back
+for the frames before the sections report.
 
 An empty card is a border around a settings icon, which reads as a fault. Each
 section decides for itself that it has nothing to say, so they report through
@@ -553,7 +564,7 @@ Git context surface being opened first.
 
 Expanded sections (`workStatusExpandedSections`, keyed by a stable section id)
 and the scroll offset (`workStatusScrollTop`) live in the persisted
-`useUIStore`. Component state would not do: the panel unmounts every time the
+`useUIStore`. Component state would not do: the content unmounts every time the
 context panel opens, which would silently discard the user's arrangement.
 
 The scroll offset is restored in the scroller's callback ref, at the moment it
