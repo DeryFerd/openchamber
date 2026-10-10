@@ -91,6 +91,14 @@ login, AWS profile for Bedrock) asks only its form and calls
 `integration.connect.external`, which stores a reference to credentials managed
 outside OpenCode; the account then lists as "External credentials".
 
+Vertex can sign in through Google Application Default Credentials on the server
+machine, which OpenCode neither stores nor reports as a connection. When
+OpenCode resolved a project for Vertex (`settings.project` on the provider it
+serves), `usesMachineCredentials` counts that as credentials: the card shows
+"From environment" and the models section stays open. A provider listed in the
+OpenCode config is switched on (`activation: "enabled"`) even without a key, so
+activation alone is not a sign-in signal.
+
 The custom-provider form can discover models before save through
 `POST /api/provider/discover-models`. Discovery is a one-time prefill the user
 starts with "Find models": they pick which returned models to add, the review

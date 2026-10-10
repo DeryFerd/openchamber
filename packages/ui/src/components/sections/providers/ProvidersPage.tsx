@@ -30,6 +30,7 @@ import {
   shouldAutoOpenAuthPanel,
   shouldShowApiKeyAuth,
   shouldShowModelsSection,
+  usesMachineCredentials,
   findIntegrationForProvider,
   getCredentialConnections,
   getKeyMethod,
@@ -299,6 +300,7 @@ export const ProvidersPage: React.FC = () => {
     const hasCreds = providerHasCredentials({
       connections: getProviderConnections(integrations, selectedProviderId),
       optionsApiKey: readProviderApiKeySetting(provider),
+      machineCredentials: usesMachineCredentials(provider),
     });
     const isEditableCustomProvider = Boolean(
       provider && isConfigDefinedCustomProvider(provider, sources)
@@ -715,6 +717,7 @@ export const ProvidersPage: React.FC = () => {
   const hasCredentials = providerHasCredentials({
     connections: getProviderConnections(integrations ?? [], selectedProvider.id),
     optionsApiKey: readProviderApiKeySetting(selectedProvider),
+    machineCredentials: usesMachineCredentials(selectedProvider),
   });
   const authStatusIncomplete = requiresProviderAuth(integrationsLoaded, hasCredentials, isEditableCustomProvider);
   const showModelsSection = shouldShowModelsSection({
