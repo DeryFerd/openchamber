@@ -19,7 +19,8 @@
  * Validity: a toggle fails when the width did not change the expected way,
  * the page never saw the input, the width transition is declared but never
  * ran (or is not declared without reduced motion), the window produced no
- * frames, or the trace has no renderer main thread for it. The run writes its
+ * frames, the trace has no renderer main thread for it, or, with --open-file,
+ * the editor does not show the file after the panel opened. The run writes its
  * summary and exits non-zero.
  */
 
@@ -85,6 +86,11 @@ Scenario:
                            sidebar-with-panel  left sidebar close/open, panel open
   --surface <mode>         Context surface the panel opens with (default: file).
                            One of: ${Object.keys(SURFACE_ICONS).join(", ")}
+  --open-file <name>       With --surface file: before measuring, open this file
+                           from the panel's file tree (a root-level entry of the
+                           project, matched by name), so every panel toggle shows
+                           the editor with it. A panel-open toggle whose editor
+                           is not showing the file afterwards is invalid
   --method <click|key>     Click the real toggle button (default), or press the
                            shortcut: mod+b for the sidebar, mod+alt+<rail digit>
                            for the panel
@@ -140,7 +146,7 @@ const positiveInteger = (value, name, { allowZero = false } = {}) => {
 
 const parseArgs = (argv) => {
   const options = {
-    url: "http://localhost:3000", title: "perf: long 120", session: null, phases: Object.keys(PHASES), surface: "file",
+    url: "http://localhost:3000", title: "perf: long 120", session: null, phases: Object.keys(PHASES), surface: "file", openFile: null,
     method: "click", mod: null, count: 5, warmup: 1, hover: 400, pre: 400, window: 2000, tail: 250, settle: 1000,
     loadSettle: 12, reducedMotion: false, renderProbe: false, renderProbeHook: null, cpuProfile: false, injectScript: null, extraCategories: [],
     output: null, label: null, chrome: null, profileDir: null, headless: false,
@@ -153,6 +159,7 @@ const parseArgs = (argv) => {
     else if (value === "--session") options.session = argv[++index]
     else if (value === "--phases") options.phases = String(argv[++index]).split(",").map((name) => name.trim()).filter(Boolean)
     else if (value === "--surface") options.surface = argv[++index]
+    else if (value === "--open-file") options.openFile = String(argv[++index])
     else if (value === "--method") options.method = argv[++index]
     else if (value === "--mod") options.mod = argv[++index]
     else if (value === "--count") options.count = Number(argv[++index])
@@ -179,6 +186,7 @@ const parseArgs = (argv) => {
   const unknownPhases = options.phases.filter((name) => !PHASES[name])
   if (unknownPhases.length || options.phases.length === 0) throw new Error(`--phases takes ${Object.keys(PHASES).join(", ")}`)
   if (!SURFACE_ICONS[options.surface]) throw new Error(`--surface takes ${Object.keys(SURFACE_ICONS).join(", ")}`)
+  if (options.openFile !== null && options.surface !== "file") throw new Error("--open-file needs --surface file")
   if (!["click", "key"].includes(options.method)) throw new Error("--method is click or key")
   if (options.mod !== null && !["meta", "ctrl"].includes(options.mod)) throw new Error("--mod is meta or ctrl")
   positiveInteger(options.count, "--count")
@@ -417,6 +425,21 @@ const locateControl = (client, kind, surface) => evaluateValue(client, `(() => {
   return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2), railIndex: rail.indexOf(button) + 1 }
 })()`)
 
+/**
+ * Whether the context panel's editor shows `name`: a CodeMirror content with
+ * text, laid out, in the right slot whose tab strip names the file. Read
+ * outside a recorded window only, since it reads geometry.
+ */
+const readEditorShown = (client, name) => evaluateValue(client, `(() => {
+  const slot = document.querySelector("[data-right-slot]")
+  const content = slot?.querySelector(".cm-content")
+  if (!content) return { shown: false, reason: "no editor in the panel" }
+  const rect = content.getBoundingClientRect()
+  const chars = (content.textContent ?? "").length
+  const named = (slot.textContent ?? "").includes(${JSON.stringify(name)})
+  return { shown: rect.width > 0 && rect.height > 0 && chars > 0 && named, chars, width: Math.round(rect.width), named }
+})()`)
+
 const readIsOpen = (client, kind) => evaluateValue(client, `(${PAGE_IS_OPEN})(${JSON.stringify(kind)}, (${PAGE_TARGETS})[${JSON.stringify(kind)}]())`)
 
 const fmt = (value, unit = "ms") => (value === null || value === undefined ? "-" : `${round(value, 1)}${unit}`)
@@ -545,6 +568,34 @@ const main = async () => {
 
     if ((await evaluateValue(client, `(${installToggleProbe.toString()})(${PAGE_TARGETS}, ${PAGE_IS_OPEN})`)) !== true) throw new Error("The toggle recorder did not install in the page.")
 
+    // A file open in the panel's editor, so a panel toggle shows it.
+    let openedFile = null
+    if (options.openFile) {
+      await ensure("sidebar", true)
+      await ensure("panel", true)
+      const fileRow = await evaluateValue(client, `(() => {
+        const item = [...document.querySelectorAll("[data-right-slot] [data-file-tree-path]")]
+          .find((element) => element.getAttribute("data-file-tree-path").replace(/\\\\/g, "/").split("/").pop() === ${JSON.stringify(options.openFile)})
+        const row = item?.firstElementChild
+        if (!row) return null
+        const rect = row.getBoundingClientRect()
+        return { path: item.getAttribute("data-file-tree-path"), x: Math.round(rect.x + Math.min(60, rect.width / 2)), y: Math.round(rect.y + rect.height / 2) }
+      })()`)
+      if (!fileRow) throw new Error(`No root-level entry "${options.openFile}" in the panel's file tree; the scenario never ran.`)
+      await clickAt(client, fileRow)
+      const fileDeadline = Date.now() + 20_000
+      let shown = null
+      while (Date.now() < fileDeadline) {
+        shown = await readEditorShown(client, options.openFile)
+        if (shown?.shown) break
+        await wait(250)
+      }
+      if (!shown?.shown) throw new Error(`The editor did not show ${options.openFile} within 20 s (${JSON.stringify(shown)}); the scenario never ran.`)
+      openedFile = { name: options.openFile, path: fileRow.path, chars: shown.chars, panelWidth: await evaluateValue(client, `Math.round(document.querySelector("[data-right-slot]").getBoundingClientRect().width)`) }
+      console.log(`Opened ${fileRow.path} in the panel editor (${shown.chars} characters rendered, panel ${openedFile.panelWidth} px).`)
+      await wait(1500)
+    }
+
     const traceEvents = []
     client.on("Tracing.dataCollected", ({ value }) => { for (const event of value ?? []) traceEvents.push(event) })
     if (options.cpuProfile) {
@@ -596,6 +647,8 @@ const main = async () => {
           await evaluateValue(client, `window.__openchamberToggleProbe.whenDone()`)
           const raw = await evaluateValue(client, `window.__openchamberToggleProbe.finish()`)
           if (!raw) throw new Error(`Toggle ${index} (${type}): the recorder returned nothing`)
+          // After the window, so its geometry read forces nothing inside it.
+          const editor = options.openFile && phase.kind === "panel" && expectOpen ? await readEditorShown(client, options.openFile) : null
           const refreshMs = estimateRefreshMs(raw.frames.filter((at) => at < raw.t0))
           const from = raw.inputAt ?? raw.t0
           const frames = frameStats(raw.frames, { from, to: raw.endAt, refreshMs })
@@ -620,6 +673,7 @@ const main = async () => {
               entries: raw.loaf,
             } : null,
             eventTiming: raw.eventTimingSupported ? (raw.eventTiming ?? { durationMs: null, belowThreshold: true }) : null,
+            editor,
             reducedMotion: raw.reducedMotion,
             visibility: raw.visibility,
             focused: raw.focused,
@@ -640,6 +694,7 @@ const main = async () => {
           if (frames.frames < 2) failures.push(`${frames.frames} animation frames in the window: the renderer was not producing frames`)
           if (refreshMs === null || refreshMs > 50) failures.push(`refresh interval ${refreshMs ?? "unknown"} ms before the input: the renderer was throttled`)
           if (raw.visibility !== "visible") failures.push(`document was ${raw.visibility}`)
+          if (editor && !editor.shown) failures.push(`the editor does not show ${options.openFile} after opening (${editor.reason ?? `${editor.chars} characters, named ${editor.named}`})`)
           if (raw.timedOut) toggle.warnings.push(`the transition had not ended after ${options.window} ms`)
           if (raw.reducedMotion && raw.transition.declaredMs > 0) toggle.warnings.push("animates although prefers-reduced-motion is set")
           if (!raw.focused) toggle.warnings.push("document did not have focus")
@@ -715,6 +770,7 @@ const main = async () => {
       method: options.method,
       mod: options.method === "key" ? mod.key : null,
       surface: options.surface,
+      openedFile,
       phases: options.phases,
       count: options.count,
       warmup: options.warmup,

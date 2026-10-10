@@ -569,6 +569,9 @@ open state is read from `data-context-panel-open`, never from the width.
 Builds older than these hooks are found by icon and class, and the panel is
 open when wider than 1 px, so a baseline from before them still measures. The
 `file` surface opens tree-only (240 px) in a project with no file open;
+`--open-file <name>` first opens that root-level file of the project from the
+panel's tree, so every panel toggle shows the editor with it, and a
+`panel-open` whose editor does not show the file afterwards is invalid.
 `--surface context` measures a full-width panel. `--method key` presses `mod+b` and
 `mod+alt+<rail digit>`, as the app's shortcuts read them. The pointer rests on
 the button for `--hover` ms before a phase, so its tooltip opens there; the
@@ -627,10 +630,15 @@ Prove the instruments with the positive control (Ablations below):
 and forced layouts on every toggle.
 
 `--extra-categories cc,gpu,viz` adds trace categories. A long main-thread
-`Commit` in the first frame after a toggle with nothing traced inside it is
-the main thread waiting on the compositor and GPU pipeline, not script, style
-or layout; on the 2026-10 measurements it held 36 to 77 ms before and about
-50 ms after the toggle work was removed, cause not identified.
+`Commit` with nothing traced inside it is not necessarily the compositor:
+add `accessibility` first. Chrome serializes its accessibility tree inside
+`Commit` (`SerializeLifecycleStage`) whenever an accessibility client is on,
+which on macOS includes apps that read other windows, so a headed run on such
+a machine pays it and a headless one never does. The ~40 to 50 ms `Commit`
+after every panel animation is this pass, and hiding a CodeMirror editor in
+place (`aria-hidden`, `inert`, `display: none`, `content-visibility`) made it
+200 to 300 ms per close, while removing the editor's DOM cost a few ms
+(`CodeMirrorEditor` `detached`). Quote such toggles from headed runs.
 
 ## Comparing Two Builds
 
