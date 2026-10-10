@@ -1233,7 +1233,6 @@ export const ContextPanel: React.FC = () => {
     ['--oc-context-panel-width' as string]: isOpen && isExpanded ? expandedWidth : `${width}px`,
     width: slotWidth,
     maxWidth: '100%',
-    overflowX: isOpen && isExpanded ? undefined : 'clip',
     transitionDuration: coverChanged ? '0ms' : `${LAYOUT_ANIMATION_MS}ms`,
     transitionTimingFunction: LAYOUT_ANIMATION_EASING,
   };
@@ -1246,7 +1245,13 @@ export const ContextPanel: React.FC = () => {
       data-context-panel-open={isOpen ? 'true' : 'false'}
       tabIndex={-1}
       className={cn(
-        'flex min-h-0 flex-col overflow-hidden bg-background',
+        // `overflow-clip` on both axes, never `hidden`: a `hidden` axis makes
+        // the slot a scroll container, and an `overflow-x: clip` beside an
+        // `overflow-y: hidden` computes to `hidden` too. The closed panel's
+        // content is wider than the card's column, so a `scrollIntoView`
+        // inside it (the tab strip revealing its active tab on mount)
+        // scrolled the slot sideways and dragged the card left, clipped.
+        'flex min-h-0 flex-col overflow-clip bg-background',
         // Right-anchored while expanded: `inset-0` would teleport the left
         // edge instantly (position does not transition), so only the width
         // animates and the panel grows leftwards from its docked position.

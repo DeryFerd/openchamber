@@ -9,6 +9,11 @@ import { create } from 'zustand';
  * `ContextPanel` owns the slot and renders the card's host element;
  * `ChatContainer` portals the inline `WorkStatusPanel` into it. The card tells
  * the slot whether it wants its column while the context panel is closed.
+ *
+ * The slot clips its overflow and is never a scroll container: the closed
+ * panel's content is wider than the card's column, and a `scrollIntoView`
+ * inside it would otherwise scroll the slot sideways and drag the
+ * right-anchored card out of view.
  */
 
 type RightSlotState = {
