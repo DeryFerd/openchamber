@@ -101,7 +101,9 @@ other.
   tracker works. The URL decides what is stored: a GitHub pull or issue
   address becomes the GitHub entry (kind from the path, live state as for any
   link), a Linear issue address the Linear entry, anything else an `external`
-  entry shown by identifier. It only adds or refreshes links, never removes
+  entry shown by identifier. A GitLab merge request or issue address (the
+  `/-/merge_requests/N` shape on any host) is keyed by the thread, so linking
+  it again from a tab like `/diffs` or with a query refreshes the one entry. It only adds or refreshes links, never removes
   one: the user owns removal. A missing field or a non-http(s) URL is a 400 and
   nothing is written.
 - `file.open` shows a file in the user's viewer. `file-open.js` resolves a
