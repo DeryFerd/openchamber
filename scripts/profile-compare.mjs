@@ -95,6 +95,8 @@ const SCENARIOS = {
   // user's frames. Opens a visible window.
   toggle: { kind: "toggle", seed: true, once: true, args: (_seed, runs) => ["--title", "perf: long 120", "--count", String(runs)] },
   "toggle-short": { kind: "toggle", seed: true, once: true, args: (_seed, runs) => ["--title", "perf: short A", "--count", String(runs)] },
+  // The full-width context surface: wide enough to re-wrap the transcript.
+  "toggle-context": { kind: "toggle", seed: true, once: true, args: (_seed, runs) => ["--title", "perf: long 120", "--surface", "context", "--count", String(runs)] },
 }
 
 const SCRIPTS = {

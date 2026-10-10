@@ -131,9 +131,11 @@ What it costs here, measured on an M-series Mac with such an app running:
   the message column) re-serializes the transcript once, 40 to 50 ms, usually
   just after the animation and sometimes inside it;
 - a session switch serializes the new transcript before it shows (45 to 65
-  ms), then again when LegendList's DOM-order pass moves rows (about 40 ms
-  after the reveal) and when code blocks get their path-token spans (about
-  30 ms on a cold switch);
+  ms). It used to serialize it twice more after the reveal: when LegendList's
+  DOM-order pass moved rows (about 40 ms; rows now mount in order, see
+  `components/chat/message/parts/DOCUMENTATION.md`) and when code blocks got
+  a span around every path-like token (about 30 ms on a cold switch; only
+  confirmed files are wrapped now);
 - streaming costs about 5% of main-thread time in small passes, with no long
   task.
 
@@ -672,6 +674,12 @@ Prove the instruments with the positive control (Ablations below):
 `--inject-script scripts/perf/controls/toggle-jank.js` must read dropped frames
 and forced layouts on every toggle.
 
+On a production build the forcing stacks name chunks, not modules: the main
+app chunk is called after one of its modules (`useAppFontEffects-*.js` at the
+time of writing), so a stack "in useAppFontEffects" is any app code. Map it
+with the diagnostic build (`profile:analyze`, or `createSourceMapper` in
+`source-map.mjs`) before blaming a file.
+
 `--extra-categories cc,gpu,viz` adds trace categories. A long main-thread
 `Commit` with nothing traced inside it is usually the accessibility pass
 (When An Accessibility Client Is On): each toggle reports `accessibility ms`,
@@ -729,7 +737,7 @@ What it does, in order:
 | `startup-cold`, `startup-warm` | `profile:startup --url`, `--runs <runs>` | one invocation per round |
 | `heap` | `profile:heap --count 20` | sees the sessions earlier scenarios added; keep the scenario list identical between compares |
 | `composer` | `profile:composer` on the long session | |
-| `toggle`, `toggle-short` | `profile:toggle` on the long session and on short A, `--count <runs>` | one invocation per round; headed, opens a visible window |
+| `toggle`, `toggle-short`, `toggle-context` | `profile:toggle` on the long session and on short A, `--count <runs>`; `toggle-context` on the long session with the full-width `context` surface | one invocation per round; headed, opens a visible window |
 
 `--render-probe` and `--save-trace` pass through to the scenarios that take
 them. `--force-accessibility` launches the session, switch and toggle
