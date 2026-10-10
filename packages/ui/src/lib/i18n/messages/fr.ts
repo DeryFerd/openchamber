@@ -531,7 +531,6 @@ export const dict = {
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': 'Cette session est déjà en cours de déplacement vers un nouveau worktree.',
   'sessions.sidebar.session.menu.openInSidePanel': 'Ouvrir dans le panneau latéral',
   'sessions.sidebar.session.actions.openInEditor': 'Ouvrir dans l\'éditeur',
-  'sessions.sidebar.session.menu.betaBadge': 'bêta',
   'sessions.sidebar.session.menu.label': 'Menu des sessions',
   'sessions.sidebar.session.untitled': 'Session sans titre',
   'sessions.sidebar.session.export.nothingToExport': 'Rien à exporter',

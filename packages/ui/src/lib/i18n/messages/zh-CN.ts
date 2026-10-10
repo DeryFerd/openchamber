@@ -708,7 +708,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': '此会话已在移至新工作树。',
   'sessions.sidebar.session.menu.openInSidePanel': '在侧边面板中打开',
   'sessions.sidebar.session.actions.openInEditor': '在编辑器中打开',
-  'sessions.sidebar.session.menu.betaBadge': '测试版',
   'sessions.sidebar.session.menu.label': '会话菜单',
   'sessions.sidebar.session.untitled': '未命名会话',
   'sessions.sidebar.session.export.nothingToExport': '没有可导出的内容',

@@ -617,7 +617,6 @@ export const dict = {
   'sessions.sidebar.session.moveToWorktree.tooltipTargets': 'Mevcut worktree\'leri ve bu session için yeni bir tane oluşturma seçeneğini gösterir.',
   'sessions.sidebar.session.menu.openInSidePanel': 'Yan panelde aç',
   'sessions.sidebar.session.actions.openInEditor': 'Editörde aç',
-  'sessions.sidebar.session.menu.betaBadge': 'beta',
   'sessions.sidebar.session.menu.label': 'Session menüsü',
   'sessions.sidebar.session.untitled': 'Adsız Session',
   'sessions.sidebar.session.export.nothingToExport': 'Dışa aktarılacak bir şey yok',

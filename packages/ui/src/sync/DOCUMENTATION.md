@@ -1095,8 +1095,8 @@ cleanup runs independently of animation frames across all chat runtimes.
 
 ### Pinned chat columns
 
-A chat opened in the side panel ("Open in side panel", a subtask, a review
-session) is a second `ChatContainer` in the same app, pinned to its session
+A chat opened in the side panel ("Open in side panel" or Shift-click on a
+sidebar row, a subtask, a review session) is a second `ChatContainer` in the same app, pinned to its session
 (`pinnedSession`). It used to be an iframe that booted a whole second app per
 tab. The main chat follows the app's selection; a pinned column keeps its own
 and changes only through its own navigation (open a subtask in place, return

@@ -709,7 +709,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.moveToWorktree.tooltipMoving": "Ця сесія вже переноситься в новий worktree.",
   "sessions.sidebar.session.menu.openInSidePanel": "Відкрити на бічній панелі",
   "sessions.sidebar.session.actions.openInEditor": "Відкрити в редакторі",
-  "sessions.sidebar.session.menu.betaBadge": "бета-версія",
   "sessions.sidebar.session.menu.label": "Меню сесії",
   "sessions.sidebar.session.untitled": "Сесія без назви",
   "sessions.sidebar.session.export.nothingToExport": "Нічого для експорту",

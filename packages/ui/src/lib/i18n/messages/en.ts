@@ -707,7 +707,6 @@ export const dict = {
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': 'This session is already being moved to a new worktree.',
   'sessions.sidebar.session.menu.openInSidePanel': 'Open in Side Panel',
   'sessions.sidebar.session.actions.openInEditor': 'Open in Editor',
-  'sessions.sidebar.session.menu.betaBadge': 'beta',
   'sessions.sidebar.session.menu.label': 'Session menu',
   'sessions.sidebar.session.untitled': 'Untitled Session',
   'sessions.sidebar.session.export.nothingToExport': 'Nothing to export',

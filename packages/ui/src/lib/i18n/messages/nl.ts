@@ -699,7 +699,6 @@ export const dict = {
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': 'Deze sessie wordt al verplaatst naar een nieuwe worktree.',
   'sessions.sidebar.session.menu.openInSidePanel': 'In zijpaneel openen',
   'sessions.sidebar.session.actions.openInEditor': 'In editor openen',
-  'sessions.sidebar.session.menu.betaBadge': 'beta',
   'sessions.sidebar.session.menu.label': 'Sessiemenu',
   'sessions.sidebar.session.untitled': 'Naamloze sessie',
   'sessions.sidebar.session.export.nothingToExport': 'Niets om te exporteren',

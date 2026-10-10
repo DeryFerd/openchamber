@@ -708,7 +708,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': '이 세션은 이미 새 worktree로 이동 중입니다.',
   'sessions.sidebar.session.menu.openInSidePanel': '사이드 패널에서 열기',
   'sessions.sidebar.session.actions.openInEditor': '편집기에서 열기',
-  'sessions.sidebar.session.menu.betaBadge': 'beta',
   'sessions.sidebar.session.menu.label': '세션 메뉴',
   'sessions.sidebar.session.untitled': '제목 없는 세션',
   'sessions.sidebar.session.export.nothingToExport': '내보낼 내용 없음',

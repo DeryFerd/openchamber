@@ -614,7 +614,6 @@ export const dict = {
   'sessions.sidebar.session.menu.exportMarkdown': 'Als Markdown exportieren',
   'sessions.sidebar.session.menu.openInSidePanel': 'In Seitenleiste öffnen',
   'sessions.sidebar.session.actions.openInEditor': 'Im Editor öffnen',
-  'sessions.sidebar.session.menu.betaBadge': 'Beta',
   'sessions.sidebar.session.menu.label': 'Sitzungsmenü',
   'sessions.sidebar.session.untitled': 'Unbenannte Sitzung',
   'sessions.sidebar.session.export.nothingToExport': 'Nichts zum Exportieren',

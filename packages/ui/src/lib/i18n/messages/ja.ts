@@ -708,7 +708,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': 'このセッションはすでに新しいworktreeへ移動中です。',
   'sessions.sidebar.session.menu.openInSidePanel': 'サイドパネルで開く',
   'sessions.sidebar.session.actions.openInEditor': 'エディターで開く',
-  'sessions.sidebar.session.menu.betaBadge': 'ベータ',
   'sessions.sidebar.session.menu.label': 'セッションメニュー',
   'sessions.sidebar.session.untitled': '無題のセッション',
   'sessions.sidebar.session.export.nothingToExport': 'エクスポートするものがありません',

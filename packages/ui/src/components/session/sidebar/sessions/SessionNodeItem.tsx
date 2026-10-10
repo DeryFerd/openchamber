@@ -817,6 +817,21 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     });
   }, [session.id, sessionDirectory]);
 
+  const handleOpenInSidePanel = () => {
+    if (!sessionDirectory) return;
+    // The tab lives under the main chat's directory, which is the one
+    // the panel reads; the session's own directory rides along so a
+    // chat from another project (or Chat) still resolves itself.
+    const panelDirectory = resolveEffectiveDirectory() ?? sessionDirectory;
+    openContextPanelTab(panelDirectory, {
+      mode: 'chat',
+      dedupeKey: `session:${session.id}`,
+      label: sessionTitle,
+      sessionTitleFallback: sessionTitle,
+      targetDirectory: sessionDirectory,
+    });
+  };
+
   // Capture outside-clicks to save edits — immune to focus-race with onBlur.
   React.useEffect(() => {
     if (!isEditing) return;
@@ -1145,6 +1160,10 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       toggleRowSelected(session.id, selectionScopeKey, collectNodeDescendantIds(node), sessionRowKey);
       return;
     }
+    if (event?.shiftKey && !isVSCode && sessionDirectory) {
+      handleOpenInSidePanel();
+      return;
+    }
     if (event?.currentTarget) holdSessionRowPosition(event.currentTarget);
     handleSessionSelect(session.id, sessionDirectory);
   };
@@ -1165,6 +1184,11 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const handleRowMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
     if (event.button === 2 || (event.button === 0 && event.ctrlKey && !selectionModeEnabled)) {
       suppressNextSelectRef.current = true;
+    }
+    // Shift-click opens the session in the side panel; without this the
+    // browser extends the text selection across the sidebar.
+    if (event.button === 0 && event.shiftKey && !selectionModeEnabled) {
+      event.preventDefault();
     }
   };
   const handleRowPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -1509,25 +1533,11 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.openInSidePanel')}>
         <Item
           disabled={!sessionDirectory}
-          onClick={() => {
-            if (!sessionDirectory) return;
-            // The tab lives under the main chat's directory, which is the one
-            // the panel reads; the session's own directory rides along so a
-            // chat from another project (or Chat) still resolves itself.
-            const panelDirectory = resolveEffectiveDirectory() ?? sessionDirectory;
-            openContextPanelTab(panelDirectory, {
-              mode: 'chat',
-              dedupeKey: `session:${session.id}`,
-              label: sessionTitle,
-              sessionTitleFallback: sessionTitle,
-              targetDirectory: sessionDirectory,
-            });
-          }}
+          onClick={handleOpenInSidePanel}
           className="[&>svg]:mr-1"
         >
           <Icon name="chat-4" className="mr-1 h-4 w-4" />
           <span className="truncate">{t('sessions.sidebar.session.menu.openInSidePanel')}</span>
-          <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">{t('sessions.sidebar.session.menu.betaBadge')}</span>
         </Item>
         </SessionMenuItemHint>
       ) : null}

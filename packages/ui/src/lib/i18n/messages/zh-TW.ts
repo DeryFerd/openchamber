@@ -728,7 +728,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': '此工作階段已在移至新工作樹。',
   'sessions.sidebar.session.menu.openInSidePanel': '在側邊面板中開啟',
   'sessions.sidebar.session.actions.openInEditor': '在編輯器中開啟',
-  'sessions.sidebar.session.menu.betaBadge': 'beta',
   'sessions.sidebar.session.menu.label': '會話選單',
   'sessions.sidebar.session.untitled': '未命名會話',
   'sessions.sidebar.session.export.nothingToExport': '沒有可匯出的內容',
