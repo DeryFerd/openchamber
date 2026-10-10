@@ -5,6 +5,19 @@ navigation, expanded sections and editor state. Its `visible` prop combines
 the panel's open state with the selected tab. Hiding via CSS alone does not
 pause React effects.
 
+A closing panel's content fades out and leaves the accessibility tree
+(`aria-hidden`, `inert`) only when the close animation ends
+(`useOpenUntilSettled`); opening shows it at once. The file editor's view
+counts as hidden from the same moment, and while hidden the docked
+`CodeMirrorEditor` is `detached`: its DOM is out of the document, its state
+and scroll position kept, and it comes back on show. Hiding the editor in
+place instead (`aria-hidden`, `inert`, `display: none`, `content-visibility`)
+costs Chrome a 200 to 300 ms frame whenever an accessibility client is on,
+on every panel close and every switch away from the file surface; both must
+happen in one commit, so the editor is never hidden while attached.
+`CodeMirrorEditor` reconfigures only the compartments whose input changed,
+so `FilesView` keeps its line-number config's identity across renders.
+
 File tree ownership and request rules are in `files/DOCUMENTATION.md`.
 `DiffView` gates repository discovery, comparisons, per-file reads, viewport
 measurement and keyboard navigation on visibility. Hidden refresh hints retain

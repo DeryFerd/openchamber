@@ -1126,6 +1126,8 @@ interface UIStore {
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
   closeContextPanelTab: (directory: string, tabID: string) => void;
+  /** Closes the file tab showing `filePath`, as its close button does. */
+  closeContextFile: (directory: string, filePath: string) => void;
   closeContextPanelTabs: (directory: string, tabIds: readonly string[]) => void;
   closeContextPanel: (directory: string) => void;
   toggleContextPanelExpanded: (directory: string) => void;
@@ -1928,6 +1930,23 @@ export const useUIStore = create<UIStore>()(
 
         closeContextPanelTab: (directory, tabID) => {
           get().closeContextPanelTabs(directory, [tabID]);
+        },
+
+        closeContextFile: (directory, filePath) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedFilePath = normalizeContextTargetPath(filePath);
+          if (!normalizedDirectory || !normalizedFilePath) {
+            return;
+          }
+          const tab = get().contextPanelByDirectory[normalizedDirectory]?.tabs
+            .find((candidate) => candidate.mode === 'file' && candidate.targetPath === normalizedFilePath);
+          if (tab) {
+            get().closeContextPanelTabs(normalizedDirectory, [tab.id]);
+            return;
+          }
+          // No tab shows it (the strip was already out of step): the editor's
+          // own open files still drop it.
+          useFilesViewTabsStore.getState().removeOpenPath(normalizedDirectory, normalizedFilePath);
         },
 
         closeContextPanelTabs: (directory, tabIds) => {

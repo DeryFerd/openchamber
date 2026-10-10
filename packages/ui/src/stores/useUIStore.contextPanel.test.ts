@@ -5,6 +5,7 @@ import {
   subscribeBrowserTabLoadRequests,
   wasBrowserTabOpenedWithAddress,
 } from '../lib/browser/devServerWait';
+import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { useTerminalStore } from './useTerminalStore';
 import { useUIStore } from './useUIStore';
 
@@ -1178,5 +1179,54 @@ describe('useUIStore openAgentBrowserTab', () => {
 
     const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
     expect(tabs.find((tab) => tab.mode === 'browser')?.ownerSessionId).toBeNull();
+  });
+});
+
+describe('useUIStore closeContextFile (the editor\'s Cmd/Ctrl+W)', () => {
+  const panel = () => useUIStore.getState().contextPanelByDirectory['/repo'];
+  const activeTab = () => panel().tabs.find((tab) => tab.id === panel().activeTabId);
+  const editorOpenPaths = () => useFilesViewTabsStore.getState().byRoot['/repo']?.openPaths ?? [];
+
+  beforeEach(() => {
+    useFilesViewTabsStore.setState({ byRoot: {} });
+  });
+
+  test('closes the active file\'s tab and activates the next file, as the close button does', () => {
+    const store = useUIStore.getState();
+    store.openContextFile('/repo', '/repo/a.ts');
+    store.openContextFile('/repo', '/repo/b.ts');
+    useFilesViewTabsStore.getState().addOpenPath('/repo', '/repo/a.ts');
+    useFilesViewTabsStore.getState().addOpenPath('/repo', '/repo/b.ts');
+
+    store.closeContextFile('/repo', '/repo/b.ts');
+
+    expect(panel().tabs.map((tab) => tab.targetPath)).toEqual(['/repo/a.ts']);
+    expect(activeTab()?.targetPath).toBe('/repo/a.ts');
+    expect(panel().isOpen).toBe(true);
+    expect(editorOpenPaths()).toEqual(['/repo/a.ts']);
+  });
+
+  test('closing the last file leaves the file surface on its tree, panel open', () => {
+    const store = useUIStore.getState();
+    store.openContextFile('/repo', '/repo/a.ts');
+
+    store.closeContextFile('/repo', '/repo/a.ts');
+
+    expect(panel().tabs.some((tab) => tab.targetPath === '/repo/a.ts')).toBe(false);
+    expect(activeTab()?.mode).toBe('file');
+    expect(activeTab()?.targetPath ?? null).toBe(null);
+    expect(panel().isOpen).toBe(true);
+  });
+
+  test('a path with no tab leaves the tabs alone and still leaves the editor\'s open files', () => {
+    const store = useUIStore.getState();
+    store.openContextFile('/repo', '/repo/a.ts');
+    useFilesViewTabsStore.getState().addOpenPath('/repo', '/repo/stray.ts');
+    const before = panel().tabs;
+
+    store.closeContextFile('/repo', '/repo/stray.ts');
+
+    expect(panel().tabs).toBe(before);
+    expect(editorOpenPaths()).not.toContain('/repo/stray.ts');
   });
 });

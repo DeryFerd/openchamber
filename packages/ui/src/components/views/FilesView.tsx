@@ -700,6 +700,13 @@ const Dialogs: React.FC<DialogsProps> = ({
 interface FilesViewProps {
   visible?: boolean;
   mode?: 'full' | 'editor-only';
+  /**
+   * For a host whose tab strip owns the open files (the context panel):
+   * closing a file here, by Cmd/Ctrl+W or after the unsaved-changes prompt,
+   * closes the host's tab, which picks the next file the way its close
+   * button does. Without it the view closes the file in its own state.
+   */
+  onCloseFile?: (path: string) => void;
 }
 
 type FileEditorPosition = {
@@ -712,6 +719,9 @@ type FileEditorPosition = {
 // survives FilesView unmounts without retaining every file visited indefinitely.
 const fileEditorPositions = new Map<string, FileEditorPosition>();
 const MAX_FILE_EDITOR_POSITIONS = 100;
+
+type LineNumbersConfig = React.ComponentProps<typeof CodeMirrorEditor>['lineNumbersConfig'];
+type LineNumberHandlers = NonNullable<NonNullable<LineNumbersConfig>['domEventHandlers']>;
 
 const FilePositionEditor = ({
   positionKey,
@@ -811,7 +821,7 @@ const useAssetAuthRefresh = (
   return { readyKey, nonce };
 };
 
-export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = true }) => {
+export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = true, onCloseFile }) => {
   const { t } = useI18n();
   const { files, runtime, git } = useRuntimeAPIs();
   const { currentTheme, availableThemes, lightThemeId, darkThemeId } = useThemeSystem();
@@ -2474,6 +2484,39 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     };
   }, [applyLoadedTextContent, contentDetectedBinary, failedFilePath, loadedFilePath, readFile, readFileStat, selectedFile?.path, t, visible]);
 
+  // Closes `path` once nothing stands in the way (no unsaved edits, or the
+  // prompt was answered), moving to `nextFile` when it was the one on screen.
+  const closeOpenFile = React.useCallback((path: string, nextFile: FileNode | null) => {
+    if (onCloseFile) {
+      onCloseFile(path);
+      return;
+    }
+
+    if (root) {
+      removeOpenPath(root, path);
+    }
+
+    if (selectedFile?.path !== path) {
+      return;
+    }
+
+    if (nextFile) {
+      void handleSelectFile(nextFile);
+      return;
+    }
+
+    if (root) {
+      setSelectedPath(root, null);
+    }
+    setFileContent('');
+    setFileError(null);
+    setDesktopImageSrc('');
+    setLoadedFilePath(null);
+    if (isMobile) {
+      setShowMobilePageContent(false);
+    }
+  }, [handleSelectFile, isMobile, onCloseFile, removeOpenPath, root, selectedFile?.path, setSelectedPath]);
+
   const discardAndContinue = React.useCallback(() => {
     const nextFile = pendingSelectFileRef.current;
     const closePath = pendingClosePathRef.current;
@@ -2492,25 +2535,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     setDraftContent(fileContent);
 
     if (closePath) {
-      if (root) {
-        removeOpenPath(root, closePath);
-      }
-      if (selectedFile?.path === closePath) {
-        if (nextFile) {
-          void handleSelectFile(nextFile);
-        } else {
-          if (root) {
-            setSelectedPath(root, null);
-          }
-          setFileContent('');
-          setFileError(null);
-          setDesktopImageSrc('');
-          setLoadedFilePath(null);
-          if (isMobile) {
-            setShowMobilePageContent(false);
-          }
-        }
-      }
+      closeOpenFile(closePath, nextFile);
       return;
     }
 
@@ -2519,7 +2544,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
-  }, [fileContent, handleSelectFile, isMobile, removeOpenPath, root, selectedFile?.path, setSelectedPath]);
+  }, [closeOpenFile, fileContent, handleSelectFile]);
 
   const saveAndContinue = React.useCallback(async () => {
     const nextFile = pendingSelectFileRef.current;
@@ -2540,25 +2565,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     setConfirmDiscardOpen(false);
 
     if (closePath) {
-      if (root) {
-        removeOpenPath(root, closePath);
-      }
-      if (selectedFile?.path === closePath) {
-        if (nextFile) {
-          await handleSelectFile(nextFile);
-        } else {
-          if (root) {
-            setSelectedPath(root, null);
-          }
-          setFileContent('');
-          setFileError(null);
-          setDesktopImageSrc('');
-          setLoadedFilePath(null);
-          if (isMobile) {
-            setShowMobilePageContent(false);
-          }
-        }
-      }
+      closeOpenFile(closePath, nextFile);
       return;
     }
 
@@ -2567,7 +2574,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
-  }, [handleSelectFile, isMobile, removeOpenPath, root, saveDraft, selectedFile?.path, setSelectedPath]);
+  }, [closeOpenFile, handleSelectFile, saveDraft]);
 
   const handleCloseFile = React.useCallback((path: string) => {
     const isActive = selectedFile?.path === path;
@@ -2580,30 +2587,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
-    if (root) {
-      removeOpenPath(root, path);
-    }
-
-    if (!isActive) {
-      return;
-    }
-
-    if (nextFile) {
-      void handleSelectFile(nextFile);
-      return;
-    }
-
-    if (root) {
-      setSelectedPath(root, null);
-    }
-    setFileContent('');
-    setFileError(null);
-    setDesktopImageSrc('');
-    setLoadedFilePath(null);
-    if (isMobile) {
-      setShowMobilePageContent(false);
-    }
-  }, [getNextOpenFile, handleSelectFile, isDirty, isMobile, openFiles, removeOpenPath, root, selectedFile?.path, setSelectedPath]);
+    closeOpenFile(path, nextFile);
+  }, [closeOpenFile, getNextOpenFile, isDirty, openFiles, selectedFile?.path]);
 
   // While a file is open here, Cmd/Ctrl+W closes its tab (asking first when
   // it has unsaved edits) instead of the whole window.
@@ -3570,6 +3555,95 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       || transaction.isUserEvent('undo') || transaction.isUserEvent('redo') || transaction.isUserEvent('move')
     ));
     if (edited) pinPreviewOnEditRef.current();
+  }), []);
+
+  // Line-number gutter handlers read the latest render's state through a ref,
+  // so the config handed to CodeMirror keeps its identity: a new one would
+  // rebuild the gutter on every FilesView render.
+  const lineNumberHandlers: LineNumberHandlers = {
+    mousedown: (view, line, event) => {
+      if (!(event instanceof MouseEvent)) {
+        return false;
+      }
+      if (event.button !== 0) {
+        return false;
+      }
+      event.preventDefault();
+
+      const lineNumber = view.state.doc.lineAt(line.from).number;
+
+      if (
+        lineSelection &&
+        !event.shiftKey &&
+        Math.min(lineSelection.start, lineSelection.end) === lineNumber &&
+        Math.max(lineSelection.start, lineSelection.end) === lineNumber
+      ) {
+        setLineSelection(null);
+        cancel();
+        isSelectingRef.current = false;
+        selectionStartRef.current = null;
+        setIsDragging(false);
+        return true;
+      }
+
+      // Mobile: tap-to-extend selection
+      if (isMobile && lineSelection && !event.shiftKey) {
+        const start = Math.min(lineSelection.start, lineSelection.end, lineNumber);
+        const end = Math.max(lineSelection.start, lineSelection.end, lineNumber);
+        setLineSelection({ start, end });
+        isSelectingRef.current = false;
+        selectionStartRef.current = null;
+        setIsDragging(false);
+        return true;
+      }
+
+      isSelectingRef.current = true;
+      selectionStartRef.current = lineNumber;
+      setIsDragging(true);
+
+      if (lineSelection && event.shiftKey) {
+        const start = Math.min(lineSelection.start, lineNumber);
+        const end = Math.max(lineSelection.end, lineNumber);
+        setLineSelection({ start, end });
+      } else {
+        setLineSelection({ start: lineNumber, end: lineNumber });
+      }
+
+      return true;
+    },
+    mouseover: (view, line, event) => {
+      if (!(event instanceof MouseEvent)) {
+        return false;
+      }
+      if (event.buttons !== 1) {
+        return false;
+      }
+      if (!isSelectingRef.current || selectionStartRef.current === null) {
+        return false;
+      }
+
+      const lineNumber = view.state.doc.lineAt(line.from).number;
+      const start = Math.min(selectionStartRef.current, lineNumber);
+      const end = Math.max(selectionStartRef.current, lineNumber);
+      setLineSelection({ start, end });
+      setIsDragging(true);
+      return false;
+    },
+    mouseup: () => {
+      isSelectingRef.current = false;
+      selectionStartRef.current = null;
+      setIsDragging(false);
+      return false;
+    },
+  };
+  const lineNumberHandlersRef = React.useRef(lineNumberHandlers);
+  lineNumberHandlersRef.current = lineNumberHandlers;
+  const lineNumbersConfig = React.useMemo<LineNumbersConfig>(() => ({
+    domEventHandlers: {
+      mousedown: (view, line, event) => lineNumberHandlersRef.current.mousedown?.(view, line, event) ?? false,
+      mouseover: (view, line, event) => lineNumberHandlersRef.current.mouseover?.(view, line, event) ?? false,
+      mouseup: (view, line, event) => lineNumberHandlersRef.current.mouseup?.(view, line, event) ?? false,
+    },
   }), []);
 
   const editorExtensions = React.useMemo(() => {
@@ -4895,6 +4969,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 <FilePositionEditor
                   key={filePositionKey}
                   positionKey={filePositionKey}
+                  detached={!visible}
                   value={draftContent}
                   onChange={setDraftContent}
                   readOnly={!canEdit}
@@ -4925,84 +5000,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                       end: Math.max(lineSelection.start, lineSelection.end),
                     }
                     : undefined}
-                  lineNumbersConfig={{
-                    domEventHandlers: {
-                      mousedown: (view: EditorView, line: { from: number; to: number }, event: Event) => {
-                        if (!(event instanceof MouseEvent)) {
-                          return false;
-                        }
-                        if (event.button !== 0) {
-                          return false;
-                        }
-                        event.preventDefault();
-
-                        const lineNumber = view.state.doc.lineAt(line.from).number;
-
-                        if (
-                          lineSelection &&
-                          !event.shiftKey &&
-                          Math.min(lineSelection.start, lineSelection.end) === lineNumber &&
-                          Math.max(lineSelection.start, lineSelection.end) === lineNumber
-                        ) {
-                          setLineSelection(null);
-                          cancel();
-                          isSelectingRef.current = false;
-                          selectionStartRef.current = null;
-                          setIsDragging(false);
-                          return true;
-                        }
-
-                        // Mobile: tap-to-extend selection
-                          if (isMobile && lineSelection && !event.shiftKey) {
-                            const start = Math.min(lineSelection.start, lineSelection.end, lineNumber);
-                            const end = Math.max(lineSelection.start, lineSelection.end, lineNumber);
-                            setLineSelection({ start, end });
-                            isSelectingRef.current = false;
-                            selectionStartRef.current = null;
-                            setIsDragging(false);
-                            return true;
-                          }
-
-                          isSelectingRef.current = true;
-                          selectionStartRef.current = lineNumber;
-                          setIsDragging(true);
-
-                          if (lineSelection && event.shiftKey) {
-                          const start = Math.min(lineSelection.start, lineNumber);
-                          const end = Math.max(lineSelection.end, lineNumber);
-                          setLineSelection({ start, end });
-                        } else {
-                          setLineSelection({ start: lineNumber, end: lineNumber });
-                        }
-
-                        return true;
-                      },
-                      mouseover: (view: EditorView, line: { from: number; to: number }, event: Event) => {
-                        if (!(event instanceof MouseEvent)) {
-                          return false;
-                        }
-                        if (event.buttons !== 1) {
-                          return false;
-                        }
-                        if (!isSelectingRef.current || selectionStartRef.current === null) {
-                          return false;
-                        }
-
-                        const lineNumber = view.state.doc.lineAt(line.from).number;
-                          const start = Math.min(selectionStartRef.current, lineNumber);
-                          const end = Math.max(selectionStartRef.current, lineNumber);
-                          setLineSelection({ start, end });
-                          setIsDragging(true);
-                          return false;
-                        },
-                        mouseup: () => {
-                          isSelectingRef.current = false;
-                          selectionStartRef.current = null;
-                          setIsDragging(false);
-                          return false;
-                        },
-                      },
-                  }}
+                  lineNumbersConfig={lineNumbersConfig}
                 />
               </div>
               {shouldMaskEditorForPendingNavigation && (

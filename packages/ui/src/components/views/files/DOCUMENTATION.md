@@ -20,7 +20,11 @@ Outside a repository no entries are ignored, so the hardcoded `node_modules`
 name filter remains as a fallback. Search already follows the same setting.
 
 Desktop `FilesView` in editor-only mode neither loads nor constructs its unused
-tree. Mobile retains its tree. The context panel passes actual visibility,
+tree. In the context panel the panel's tab strip owns the open files: closing
+a file from the editor (Cmd/Ctrl+W in the desktop app, which the window menu
+turns into `openchamber:close-tab` through `lib/closeTabTarget.ts`, or the
+unsaved-changes prompt that may come first) goes through `onCloseFile` to
+`closeContextFile`, which closes that tab exactly as its close button does. Mobile retains its tree. The context panel passes actual visibility,
 including the panel's open state, its active tab, and the editor toggle, to each file surface.
 Hidden surfaces retain drafts, loaded content and scroll state. They stop
 directory and file metadata polling; reopening checks freshness once before

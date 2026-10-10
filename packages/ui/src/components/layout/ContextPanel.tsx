@@ -86,6 +86,7 @@ import { getContextSurfaceDefaultWidth } from '@/lib/surfaces/registry';
 import { beginLayoutAnimation, cancelWhenLayoutSettled, LAYOUT_ANIMATION_EASING, LAYOUT_ANIMATION_MS, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import { WORK_STATUS_COLUMN_WIDTH } from '@/components/chat/work-status/useWorkStatusVisibility';
 import { setWorkStatusHost, useRightSlotStore } from './rightSlot';
+import { useOpenUntilSettled } from './useOpenUntilSettled';
 import { isEditorEventTarget } from '@/lib/editorFocus';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
@@ -510,6 +511,7 @@ export const ContextPanel: React.FC = () => {
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
+  const closeContextFile = useUIStore((state) => state.closeContextFile);
   const pinContextPanelTab = useUIStore((state) => state.pinContextPanelTab);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
@@ -788,6 +790,12 @@ export const ContextPanel: React.FC = () => {
       document.documentElement.style.cursor = '';
     }
   }, [isResizing]);
+
+  // The editor's Cmd/Ctrl+W and its unsaved-changes prompt close the file's
+  // tab here, so the strip and the next file follow as with the close button.
+  const handleCloseEditorFile = React.useCallback((filePath: string) => {
+    if (directoryKey) closeContextFile(directoryKey, filePath);
+  }, [closeContextFile, directoryKey]);
 
   const handleClose = React.useCallback(() => {
     if (!directoryKey) {
@@ -1229,6 +1237,15 @@ export const ContextPanel: React.FC = () => {
     if (!coverChanged) beginLayoutAnimation(LAYOUT_ANIMATION_MS);
   }, [animationKey, coverChanged]);
 
+  // A closing panel's content fades out and only then leaves the
+  // accessibility tree, in the same commit that takes the file editor's DOM
+  // out (CodeMirrorEditor `detached`). Hiding the editor from accessibility
+  // while it is still in the document costs Chrome a 200 to 300 ms frame
+  // whenever an accessibility client is on (a screen reader, or any app
+  // that reads other windows, common on macOS); removing it costs a few ms.
+  // After the layout effect above, which begins the animation.
+  const contentHidden = !useOpenUntilSettled(isOpen);
+
   const panelStyle: React.CSSProperties = {
     ['--oc-context-panel-width' as string]: isOpen && isExpanded ? expandedWidth : `${width}px`,
     width: slotWidth,
@@ -1304,8 +1321,8 @@ export const ContextPanel: React.FC = () => {
           transitionDuration: `${LAYOUT_ANIMATION_MS}ms`,
           transitionTimingFunction: LAYOUT_ANIMATION_EASING,
         }}
-        aria-hidden={!isOpen}
-        inert={!isOpen || undefined}
+        aria-hidden={contentHidden}
+        inert={contentHidden || undefined}
       >
       {header}
       <div className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
@@ -1315,7 +1332,7 @@ export const ContextPanel: React.FC = () => {
               // Hidden rather than unmounted so a hidden editor keeps its state.
               <div className={cn('h-full min-w-0 flex-1', hasOpenEditorFile && !showsEditor && 'hidden')}>
                 {hasOpenEditorFile ? (
-                  <React.Suspense fallback={null}><FilesView mode="editor-only" visible={isOpen && isFileTabActive && showsEditor} /></React.Suspense>
+                  <React.Suspense fallback={null}><FilesView mode="editor-only" visible={!contentHidden && isFileTabActive && showsEditor} onCloseFile={handleCloseEditorFile} /></React.Suspense>
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                     <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />
