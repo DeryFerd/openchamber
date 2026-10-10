@@ -932,7 +932,11 @@ request is on the wire while React renders. `ChatContainer` consumes a
 reactions (active row, URL, tabs) and the timeline for the new session renders
 in a transition behind it. Selection *policy* inside `ChatContainer` (auto-
 opening a draft when nothing is selected) reads the live store value, because
-the deferred one still names the previous session for one commit.
+the deferred one still names the previous session for one commit. A selection
+arriving from nothing (a draft just submitted, an empty chat) is not deferred:
+there is no previous conversation to keep, and a deferred `null` beside the
+already-closed draft rendered the empty state for a commit, remounting the
+whole column, composer and work-status card included.
 
 A session whose messages are not in memory at the click keeps the previous
 timeline on screen while they load (up to 400ms), then swaps straight to the

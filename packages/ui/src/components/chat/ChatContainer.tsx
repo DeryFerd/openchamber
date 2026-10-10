@@ -99,6 +99,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts
 import { ChatSearchBar } from './search/ChatSearchBar';
 import { WorkStatusPanel } from './work-status/WorkStatusPanel';
 import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
+import { useShownSessionSelection } from './useShownSessionSelection';
 import { useRightSlotStore } from '@/components/layout/rightSlot';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
@@ -792,7 +793,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         waitedSessionIdRef.current = liveSessionId && !liveSessionRenderable ? liveSessionId : null;
     }
     const targetSelection = holdPreviousTimeline ? shownSelectionRef.current : liveSelection;
-    const { sessionId: currentSessionId, directory: currentSessionDirectory } = React.useDeferredValue(targetSelection);
+    const { sessionId: currentSessionId, directory: currentSessionDirectory } = useShownSessionSelection(targetSelection);
     shownSelectionRef.current = { sessionId: currentSessionId, directory: currentSessionDirectory };
     const revealWaited = Boolean(currentSessionId) && currentSessionId === waitedSessionIdRef.current;
 
