@@ -21,6 +21,8 @@ const MAX_TEXT_CHARS = 6_000;
 const MAX_ELEMENTS = 120;
 /** Enough to recognise a control; full labels are what made entries expensive. */
 const MAX_LABEL_CHARS = 80;
+/** Longest a scroll waits for paint frames before it reports anyway. */
+const SCROLL_SETTLE_MAX_MS = 100;
 
 /**
  * Shared helpers, injected into each script. `describe` builds the same kind of
@@ -292,22 +294,31 @@ export const buildScrollScript = ({ selector, direction }: { selector?: string; 
   var selector = ${JSON.stringify(selector ?? '')};
   var direction = ${JSON.stringify(direction ?? '')};
 
+  // Two frames let the layout catch up, but a page in a hidden background tab
+  // is not composited and gets no frames at all while still reporting itself
+  // visible, so the wait is capped by a timer. The scroll
+  // itself is instant, so the position read then is already the final one.
   var settle = function (extra) {
     return new Promise(function (resolve) {
+      var done = false;
+      var finish = function () {
+        if (done) return;
+        done = true;
+        var doc = document.documentElement;
+        var maxScrollY = Math.max(0, doc.scrollHeight - window.innerHeight);
+        var scrollY = Math.round(window.scrollY);
+        var result = { ok: true, scrollY: scrollY, maxScrollY: Math.round(maxScrollY) };
+        result.atTop = scrollY <= 1;
+        result.atBottom = scrollY >= maxScrollY - 1;
+        for (var key in extra) {
+          if (Object.prototype.hasOwnProperty.call(extra, key)) result[key] = extra[key];
+        }
+        resolve(result);
+      };
       requestAnimationFrame(function () {
-        requestAnimationFrame(function () {
-          var doc = document.documentElement;
-          var maxScrollY = Math.max(0, doc.scrollHeight - window.innerHeight);
-          var scrollY = Math.round(window.scrollY);
-          var result = { ok: true, scrollY: scrollY, maxScrollY: Math.round(maxScrollY) };
-          result.atTop = scrollY <= 1;
-          result.atBottom = scrollY >= maxScrollY - 1;
-          for (var key in extra) {
-            if (Object.prototype.hasOwnProperty.call(extra, key)) result[key] = extra[key];
-          }
-          resolve(result);
-        });
+        requestAnimationFrame(finish);
       });
+      setTimeout(finish, ${SCROLL_SETTLE_MAX_MS});
     });
   };
 

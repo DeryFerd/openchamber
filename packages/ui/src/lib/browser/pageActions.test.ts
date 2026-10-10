@@ -73,6 +73,22 @@ describe('page action scripts', () => {
     expect(buildScrollScript({ selector: 'footer' })).toContain("behavior: 'instant'");
   });
 
+  test('scrolling answers on a page that gets no paint frames', async () => {
+    // A background tab is not composited, so its requestAnimationFrame never
+    // fires. Waiting on frames alone left the action hanging until it timed out.
+    const win = new Window({ url: 'https://example.test/' });
+    const noFrames = (): number => 0;
+    const run = new Function(
+      'window', 'document', 'location', 'CSS', 'requestAnimationFrame', 'setTimeout',
+      `return ${buildScrollScript({ direction: 'down' })}`,
+    );
+    const answer = Promise.resolve(run(win, win.document, win.location, win.CSS, noFrames, setTimeout));
+    const hung = new Promise((resolve) => setTimeout(() => resolve('hung'), 1_000));
+    const result = await Promise.race([answer, hung]);
+    expect(result).toMatchObject({ ok: true, direction: 'down' });
+    await win.happyDOM.close();
+  });
+
   test('a scoped snapshot reads only the subtree it was given', () => {
     const script = buildSnapshotScript({ selector: '#changelog' });
     expect(script).toContain('"#changelog"');

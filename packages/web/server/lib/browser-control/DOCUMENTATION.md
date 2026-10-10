@@ -84,6 +84,8 @@ itself; it can only ask and wait.
   pane. `browser.capture` never opens the panel or switches its tab: a hidden
   pane is drawn at zero opacity inside the window for the screenshot, because
   Chromium composites a transparent webview but not a hidden or clipped one.
+  A hidden page also gets no animation frames, so `browser.scroll` waits for
+  two frames at most 100 ms (`pageActions.ts`) and then answers anyway.
   Agent work never takes keyboard focus from the user
   (`useWebviewFocusGuard` beside `BrowserPane`): a page may take focus only
   while the user can see it and no agent action is driving it, otherwise focus
