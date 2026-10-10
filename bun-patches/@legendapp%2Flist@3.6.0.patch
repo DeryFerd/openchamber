@@ -1,5 +1,5 @@
 diff --git a/react-native.web.js b/react-native.web.js
-index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..5061acfa213244b0a0922d33c6ab5deb005d3625 100644
+index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..449d7680fb561dc9cc7c4cb378a5573c1c4bd77c 100644
 --- a/react-native.web.js
 +++ b/react-native.web.js
 @@ -1171,7 +1171,11 @@ function warnDevOnce(id, text) {
@@ -15,7 +15,27 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..5061acfa213244b0a0922d33c6ab5deb
  }
  function isNullOrUndefined(value) {
    return value === null || value === void 0;
-@@ -6098,7 +6102,11 @@ function useDOMOrder(ref) {
+@@ -4828,11 +4832,16 @@ function calculateItemsInView(ctx, params = {}) {
+           allocationEnd,
+           pendingRemoval,
+           protectedContainerKeys,
+-          // Initial end alignment has no scroll velocity yet. Keep its
+-          // target-side rows first until the initial scroll settles.
++          // The initial scroll, end-aligned included, hands out containers
++          // in item order. Containers render in index order, so the rows of
++          // a freshly opened list are in DOM order from the first paint and
++          // the DOM-order pass has nothing to move: reversed for an
++          // end-aligned start, it moved nearly every row a moment after the
++          // list showed, restyling each row and re-serializing it for
++          // assistive technology.
+           // After a pause velocity can be zero on the first movement;
+           // use its displacement without treating initial insets as motion.
+-          hasActiveInitialScroll(state) ? (initialScroll == null ? void 0 : initialScroll.viewPosition) === 1 : (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
++          !hasActiveInitialScroll(state) && (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
+         );
+         for (const allocation of availableContainerAllocations) {
+           const i = allocation.itemIndex;
+@@ -6098,7 +6107,11 @@ function useDOMOrder(ref) {
    const ctx = useStateContext();
    React3.useEffect(() => {
      let timeoutId;
@@ -29,7 +49,7 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..5061acfa213244b0a0922d33c6ab5deb
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
 diff --git a/react-native.web.mjs b/react-native.web.mjs
-index 9338287159778f842fa05b5a0467336bf5f50fe8..b64436bc40d3048766434a910a2d6639db747ca3 100644
+index 9338287159778f842fa05b5a0467336bf5f50fe8..df59667796d9a544943a38ba6e0994302a202032 100644
 --- a/react-native.web.mjs
 +++ b/react-native.web.mjs
 @@ -1150,7 +1150,11 @@ function warnDevOnce(id, text) {
@@ -45,7 +65,27 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..b64436bc40d3048766434a910a2d6639
  }
  function isNullOrUndefined(value) {
    return value === null || value === void 0;
-@@ -6077,7 +6081,11 @@ function useDOMOrder(ref) {
+@@ -4807,11 +4811,16 @@ function calculateItemsInView(ctx, params = {}) {
+           allocationEnd,
+           pendingRemoval,
+           protectedContainerKeys,
+-          // Initial end alignment has no scroll velocity yet. Keep its
+-          // target-side rows first until the initial scroll settles.
++          // The initial scroll, end-aligned included, hands out containers
++          // in item order. Containers render in index order, so the rows of
++          // a freshly opened list are in DOM order from the first paint and
++          // the DOM-order pass has nothing to move: reversed for an
++          // end-aligned start, it moved nearly every row a moment after the
++          // list showed, restyling each row and re-serializing it for
++          // assistive technology.
+           // After a pause velocity can be zero on the first movement;
+           // use its displacement without treating initial insets as motion.
+-          hasActiveInitialScroll(state) ? (initialScroll == null ? void 0 : initialScroll.viewPosition) === 1 : (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
++          !hasActiveInitialScroll(state) && (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
+         );
+         for (const allocation of availableContainerAllocations) {
+           const i = allocation.itemIndex;
+@@ -6077,7 +6086,11 @@ function useDOMOrder(ref) {
    const ctx = useStateContext();
    useEffect(() => {
      let timeoutId;
@@ -59,7 +99,7 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..b64436bc40d3048766434a910a2d6639
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
 diff --git a/react.js b/react.js
-index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..5061acfa213244b0a0922d33c6ab5deb005d3625 100644
+index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..449d7680fb561dc9cc7c4cb378a5573c1c4bd77c 100644
 --- a/react.js
 +++ b/react.js
 @@ -1171,7 +1171,11 @@ function warnDevOnce(id, text) {
@@ -75,7 +115,27 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..5061acfa213244b0a0922d33c6ab5deb
  }
  function isNullOrUndefined(value) {
    return value === null || value === void 0;
-@@ -6098,7 +6102,11 @@ function useDOMOrder(ref) {
+@@ -4828,11 +4832,16 @@ function calculateItemsInView(ctx, params = {}) {
+           allocationEnd,
+           pendingRemoval,
+           protectedContainerKeys,
+-          // Initial end alignment has no scroll velocity yet. Keep its
+-          // target-side rows first until the initial scroll settles.
++          // The initial scroll, end-aligned included, hands out containers
++          // in item order. Containers render in index order, so the rows of
++          // a freshly opened list are in DOM order from the first paint and
++          // the DOM-order pass has nothing to move: reversed for an
++          // end-aligned start, it moved nearly every row a moment after the
++          // list showed, restyling each row and re-serializing it for
++          // assistive technology.
+           // After a pause velocity can be zero on the first movement;
+           // use its displacement without treating initial insets as motion.
+-          hasActiveInitialScroll(state) ? (initialScroll == null ? void 0 : initialScroll.viewPosition) === 1 : (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
++          !hasActiveInitialScroll(state) && (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
+         );
+         for (const allocation of availableContainerAllocations) {
+           const i = allocation.itemIndex;
+@@ -6098,7 +6107,11 @@ function useDOMOrder(ref) {
    const ctx = useStateContext();
    React3.useEffect(() => {
      let timeoutId;
@@ -89,7 +149,7 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..5061acfa213244b0a0922d33c6ab5deb
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
 diff --git a/react.mjs b/react.mjs
-index 9338287159778f842fa05b5a0467336bf5f50fe8..b64436bc40d3048766434a910a2d6639db747ca3 100644
+index 9338287159778f842fa05b5a0467336bf5f50fe8..df59667796d9a544943a38ba6e0994302a202032 100644
 --- a/react.mjs
 +++ b/react.mjs
 @@ -1150,7 +1150,11 @@ function warnDevOnce(id, text) {
@@ -105,7 +165,27 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..b64436bc40d3048766434a910a2d6639
  }
  function isNullOrUndefined(value) {
    return value === null || value === void 0;
-@@ -6077,7 +6081,11 @@ function useDOMOrder(ref) {
+@@ -4807,11 +4811,16 @@ function calculateItemsInView(ctx, params = {}) {
+           allocationEnd,
+           pendingRemoval,
+           protectedContainerKeys,
+-          // Initial end alignment has no scroll velocity yet. Keep its
+-          // target-side rows first until the initial scroll settles.
++          // The initial scroll, end-aligned included, hands out containers
++          // in item order. Containers render in index order, so the rows of
++          // a freshly opened list are in DOM order from the first paint and
++          // the DOM-order pass has nothing to move: reversed for an
++          // end-aligned start, it moved nearly every row a moment after the
++          // list showed, restyling each row and re-serializing it for
++          // assistive technology.
+           // After a pause velocity can be zero on the first movement;
+           // use its displacement without treating initial insets as motion.
+-          hasActiveInitialScroll(state) ? (initialScroll == null ? void 0 : initialScroll.viewPosition) === 1 : (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
++          !hasActiveInitialScroll(state) && (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
+         );
+         for (const allocation of availableContainerAllocations) {
+           const i = allocation.itemIndex;
+@@ -6077,7 +6086,11 @@ function useDOMOrder(ref) {
    const ctx = useStateContext();
    useEffect(() => {
      let timeoutId;

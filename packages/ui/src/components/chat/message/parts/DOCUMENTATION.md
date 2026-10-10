@@ -138,16 +138,20 @@ in ESM and CJS. Drop it once upstream ships #536 or an equivalent, and verify
 with `bun packages/ui/tests/chat-history-scroll.browser.mjs`, which runs the
 prepend scenarios over several row-height profiles for this reason.
 
-The same patch makes the list's DOM-order pass (`useDOMOrder`) treat its own
-mount as activity. With `initialScrollAtEnd` the list hands its first
-containers to the last rows, so a freshly opened timeline is always in reverse
-DOM order and the pass moves most rows. Moving a row restyles its whole
-subtree, about 45 ms on an eight-turn session. Unpatched, the first pass ran
-with no delay whenever the first paint already had its final geometry, inside
-the opening reveal, and held the fade-in back by that much. Patched, it waits
-for 500 ms of quiet after mount, after the reveal. Rows keep their visual
-order throughout; only the DOM order (screen readers, tab order) is corrected
-later. `scripts/legend-list-dom-order.test.mjs` checks the installed bundles.
+The same patch hands out containers in item order while the list's initial
+scroll is active, end-aligned included. Upstream reverses them for an
+end-aligned start (`renderPriority` in `findAvailableContainers`), so a
+freshly opened timeline was in reverse DOM order and the DOM-order pass
+(`useDOMOrder`) moved nearly every row about 300 ms after the reveal: each row
+restyled, and with an accessibility client on, the transcript re-serialized
+(about 40 ms on every session open and switch). Containers render in index
+order, so rows are now in DOM order (what screen readers and tab order follow)
+from the first paint, and the pass finds nothing to move. Scrolling up still
+recycles containers out of order; the pass corrects that as before. The patch
+also keeps the pass's own delay: it treats the list's mount as activity, so a
+pass that does have work waits for 500 ms of quiet instead of landing in the
+opening reveal. `scripts/legend-list-dom-order.test.mjs` runs the installed
+bundles' allocation and timer code for both.
 
 The header retains its report when expanded and has no hover background. Its
 left inset matches sorted Activity. Diff deletions use the ASCII hyphen.
@@ -189,6 +193,14 @@ finished with `stop`, so no tool patch is parsed while the turn streams.
   Markdown preview opts into rendering raw HTML (`allowRawHtml`, see
   `components/views/files/DOCUMENTATION.md`). Safe custom application links go through the
   app-link confirmation flow in every supported renderer, including VS Code.
+- File references become links only once the file is confirmed
+  (`MarkdownRendererImpl` `useFileReferenceInteractions`): inline code, links
+  and path-like tokens inside code blocks are probed through the bounded,
+  cached stat queue after the message settles (never while it streams, never
+  on mobile), and each pass writes all its links at once. Inside a code block
+  nothing is written for a token that leads nowhere, so code full of
+  `console.log` and `this.state` stays plain text with no DOM change; a real
+  file's token gets its span and link a moment after the message shows.
 - Final assistant Markdown rendering is independent from image gallery
   extraction: gallery presence never changes the chat body. Assistant image
   syntax consistently renders as a shared image icon followed by its filename,
