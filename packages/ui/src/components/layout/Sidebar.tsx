@@ -29,7 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
     const startWidthRef = React.useRef(sidebarWidth || SIDEBAR_CONTENT_WIDTH);
     const resizingWidthRef = React.useRef<number | null>(null);
     const activeResizePointerIDRef = React.useRef<number | null>(null);
-    const sidebarRef = React.useRef<HTMLElement | null>(null);
+    const sidebarRef = React.useRef<HTMLDivElement | null>(null);
 
     const clampSidebarWidth = React.useCallback((value: number) => {
         return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value));
@@ -161,8 +161,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         setSidebarWidth(finalWidth);
     };
 
+    // The column never changes its own accessibility state: a toggle hides or
+    // shows only its content, which is the landmark (`aside`), and only through
+    // `inert`. Chrome re-serializes the accessibility tree around a node whose
+    // own hidden state flips, and this column sits beside the transcript, so
+    // `aria-hidden` here cost a 40 to 55 ms frame at the start of every
+    // toggle whenever an accessibility client was on. `inert` already removes
+    // the content from the accessibility tree and from focus.
     return (
-        <aside
+        <div
             ref={sidebarRef}
             data-left-sidebar=""
             className={cn(
@@ -184,7 +191,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 transitionDuration: `${LAYOUT_ANIMATION_MS}ms`,
                 transitionTimingFunction: LAYOUT_ANIMATION_EASING,
             }}
-            aria-hidden={!isOpen || appliedWidth === 0}
         >
             {isOpen && (
                 <div
@@ -207,7 +213,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                     aria-label={t('sidebar.resize.leftPanelAria')}
                 />
             )}
-            <div
+            <aside
                 className={cn(
                     'relative z-10 flex h-full shrink-0 flex-col transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
                     isResizing && 'pointer-events-none',
@@ -218,14 +224,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                     overflowX: 'hidden',
                     contentVisibility: contentSkipped ? 'hidden' : undefined,
                 }}
-                aria-hidden={!isOpen}
                 inert={!isOpen || undefined}
             >
                 {topBar}
                 <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal>
                     <ErrorBoundary>{children}</ErrorBoundary>
                 </ScrollableOverlay>
-            </div>
-        </aside>
+            </aside>
+        </div>
     );
 };
