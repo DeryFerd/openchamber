@@ -730,12 +730,14 @@ prove which suspect owns the time.
 
 ### The diagnostic build
 
-`bun run build:web:diag` writes `packages/web/dist-diag` with the production
+`bun run build:web:diag` writes `tmp/web-dist-diag` with the production
 config (`packages/web/vite.diag.config.ts`) minus minification, plus source
 maps, plus zustand reporting store notifications to the render probe. Serve it
-with `bun run profile:serve -- --dist packages/web/dist-diag`, or use
+with `bun run profile:serve -- --dist tmp/web-dist-diag`, or use
 `profile:compare --build diag`. Unminified code runs at a different speed, so
 its timings are never quoted; it answers which function, component and store.
+It is written outside `packages/web` on purpose: the desktop app copies that
+package into its asar, so a build there ships inside the app.
 The build fails when zustand's store source changes shape, rather than
 producing store counts that silently read zero.
 
@@ -770,7 +772,7 @@ reporting zero renders.
 ### profile:analyze
 
 ```bash
-bun run profile:analyze -- <run dir> --dist <checkout>/packages/web/dist-diag
+bun run profile:analyze -- <run dir> --dist <checkout>/tmp/web-dist-diag
 bun run profile:analyze -- <run dir> --dist <…> --callers 'setProperty'
 ```
 

@@ -39,7 +39,7 @@ commands at the printed URL with --dir <root>/project.
 Options:
   --repo <checkout>        Checkout whose server and CLI run (default: this one)
   --dist <directory>       Built UI to serve (default: <repo>/packages/web/dist;
-                           the diagnostic build is <repo>/packages/web/dist-diag)
+                           the diagnostic build is <repo>/tmp/web-dist-diag)
   --root <directory>       State, project and seed directories
                            (default: tmp/perf-serve)
   --fresh                  Restore state from <root>/seed before starting, or

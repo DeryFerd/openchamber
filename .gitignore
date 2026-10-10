@@ -10,7 +10,6 @@ pnpm-debug.log*
 
 node_modules
 dist
-dist-diag
 dist-ssr
 release
 

@@ -205,7 +205,7 @@ const runOrThrow = async (description, command, args, options) => {
   if (code !== 0) throw new Error(`${description} failed with exit code ${code}; see ${options.log}`)
 }
 
-const distFor = (worktree, build) => join(worktree, "packages/web", build === "diag" ? "dist-diag" : "dist")
+const distFor = (worktree, build) => (build === "diag" ? join(worktree, "tmp/web-dist-diag") : join(worktree, "packages/web/dist"))
 
 /** Creates or reuses the side's worktree and build; returns the dist to serve. */
 const prepareSide = async (side, source, options) => {

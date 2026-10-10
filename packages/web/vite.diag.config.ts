@@ -5,8 +5,10 @@
 //  - zustand's vanilla store reports every notification to
 //    globalThis.__ocStoreProbe when a page-side probe installed one
 //    (scripts/perf/render-probe.mjs); without the probe the store is unchanged.
-// Written to dist-diag so the production dist stays in place. Measure timings on
-// the production build; use this one to name what the time was spent on.
+// Written to <repo>/tmp/web-dist-diag, outside the package: anything under
+// packages/web is copied into the desktop app's asar with @openchamber/web, and
+// a diag build there once added ~146 MB to the packaged app. Measure timings
+// on the production build; use this one to name what the time was spent on.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mergeConfig, type Plugin } from 'vite';
@@ -35,7 +37,7 @@ const zustandStoreProbe = (): Plugin => ({
 export default mergeConfig(base, {
   plugins: [zustandStoreProbe()],
   build: {
-    outDir: path.resolve(__dirname, 'dist-diag'),
+    outDir: path.resolve(__dirname, '../../tmp/web-dist-diag'),
     minify: false,
     sourcemap: true,
   },
