@@ -277,88 +277,67 @@ const extractHrefFileReferenceCandidate = (anchor: HTMLAnchorElement): string | 
   return isLikelyFilePath(href) ? href : null;
 };
 
-// Walks text nodes inside `<pre><code>` subtrees and wraps any substring that
-// looks like a `path[:line[:col]]` reference in a span carrying
-// `data-openchamber-block-path-token`. `annotateFileLinks` then promotes those
-// spans into clickable file links via the same existing pipeline used for
-// inline code (parseFileReference → fileReferenceExists → openFileReference).
-//
-// Idempotent: each `<code>` node is marked with
-// `data-openchamber-block-paths-scanned` once processed so the walk is not
-// repeated on the same element. When the renderer replaces the `<code>` subtree
-// (e.g. on content change during streaming), the new element lacks the marker and
-// will be rescanned on the next mutation-observer callback.
-const wrapBlockCodePathTokens = (container: HTMLElement): void => {
-  const codeBlocks = container.querySelectorAll<HTMLElement>('pre code');
-  if (codeBlocks.length === 0) {
-    return;
-  }
+// A path-like token (`path[:line[:col]]`) inside a `<pre><code>` block, by
+// its offsets in the block's code text.
+type BlockCodePathToken = { start: number; end: number; raw: string };
 
-  const doc = container.ownerDocument;
-  if (!doc) {
-    return;
-  }
-
-  for (const codeBlock of Array.from(codeBlocks)) {
-    if (codeBlock.getAttribute(CODE_BLOCK_PATH_SCANNED_ATTR) === 'true') {
-      continue;
+// The path-like tokens of each code block not scanned yet. Reads text only:
+// code is full of things shaped like paths (`console.log`, `this.state`),
+// and wrapping each one on mount restyled the block and re-serialized it for
+// assistive technology. A token becomes a span only once its file is
+// confirmed (`wrapBlockCodePathTokens`).
+const findBlockCodePathTokens = (container: HTMLElement): Array<{ codeBlock: HTMLElement; tokens: BlockCodePathToken[] }> => {
+  const blocks: Array<{ codeBlock: HTMLElement; tokens: BlockCodePathToken[] }> = [];
+  for (const codeBlock of Array.from(container.querySelectorAll<HTMLElement>('pre code'))) {
+    if (codeBlock.hasAttribute(CODE_BLOCK_PATH_SCANNED_ATTR)) continue;
+    const tokens: BlockCodePathToken[] = [];
+    // Skip absurdly large code blocks to keep the scan bounded.
+    const fullText = (codeBlock.textContent ?? '').length > MAX_BLOCK_CODE_SCAN_LENGTH ? '' : getMarkdownCodeText(codeBlock);
+    if (fullText.includes('.')) {
+      for (const match of fullText.matchAll(BLOCK_PATH_TOKEN_RE)) {
+        const raw = match[0];
+        if (raw && isLikelyFilePath(raw)) tokens.push({ start: match.index, end: match.index + raw.length, raw });
+      }
     }
+    blocks.push({ codeBlock, tokens });
+  }
+  return blocks;
+};
 
-    // Skip absurdly large code blocks to keep DOM work bounded.
-    if ((codeBlock.textContent ?? '').length > MAX_BLOCK_CODE_SCAN_LENGTH) {
-      codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
-      continue;
-    }
-
+// Wraps confirmed tokens of one code block in spans carrying
+// `data-openchamber-block-path-token`, which later passes treat like inline
+// code references, and marks the block scanned. A token whose text moved
+// since the scan stays text.
+const wrapBlockCodePathTokens = (
+  codeBlock: HTMLElement,
+  confirmed: Array<BlockCodePathToken & { decorate: (span: HTMLElement) => void }>,
+): void => {
+  const doc = codeBlock.ownerDocument;
+  if (confirmed.length > 0) {
     const walker = doc.createTreeWalker(codeBlock, NodeFilter.SHOW_TEXT);
     const textNodes: Text[] = [];
-    let currentNode = walker.nextNode();
-    while (currentNode) {
-      const textNode = currentNode as Text;
-      if (!textNode.parentElement?.closest('[data-md-code-line-number]')) {
-        textNodes.push(textNode);
-      }
-      currentNode = walker.nextNode();
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node instanceof Text && !node.parentElement?.closest('[data-md-code-line-number]')) textNodes.push(node);
     }
-
     const fullText = getMarkdownCodeText(codeBlock);
-    if (!fullText.includes('.')) {
-      codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
-      continue;
-    }
-
-    BLOCK_PATH_TOKEN_RE.lastIndex = 0;
-    const matches: Array<{ start: number; end: number; raw: string }> = [];
-    let match: RegExpExecArray | null = BLOCK_PATH_TOKEN_RE.exec(fullText);
-    while (match) {
-      const raw = match[0];
-      if (raw && isLikelyFilePath(raw)) {
-        matches.push({ start: match.index, end: match.index + raw.length, raw });
-      }
-      match = BLOCK_PATH_TOKEN_RE.exec(fullText);
-    }
-
-    for (const { start, end, raw } of matches.reverse()) {
+    for (const { start, end, raw, decorate } of [...confirmed].sort((left, right) => right.start - left.start)) {
+      if (fullText.slice(start, end) !== raw) continue;
       const startPosition = findTextPosition(textNodes, start, 'right');
       const endPosition = findTextPosition(textNodes, end, 'left');
-      if (!startPosition || !endPosition) {
-        continue;
-      }
+      if (!startPosition || !endPosition) continue;
 
       const range = doc.createRange();
       range.setStart(startPosition.node, startPosition.offset);
       range.setEnd(endPosition.node, endPosition.offset);
-
       const span = doc.createElement('span');
       span.setAttribute(BLOCK_PATH_TOKEN_ATTR, 'true');
       span.textContent = raw;
-
+      decorate(span);
       range.deleteContents();
       range.insertNode(span);
     }
-
-    codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
   }
+  codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
 };
 
 const getResolvedReference = (rawValue: string, effectiveDirectory: string): (ParsedFileReference & { resolvedPath: string }) | null => {
@@ -521,10 +500,11 @@ const useFileReferenceInteractions = ({
       }, delayMs);
     };
 
-    const annotateFileLinks = () => {
+    // Runs our own DOM writes with the mutation observer below ignoring them.
+    const writeAnnotations = (write: () => void) => {
       annotationWriteDepth += 1;
       try {
-        annotateFileLinksInner();
+        write();
       } finally {
         // Let the mutation events from our own writes flush before the
         // observer starts listening for real content changes again.
@@ -534,61 +514,92 @@ const useFileReferenceInteractions = ({
       }
     };
 
-    const annotateFileLinksInner = () => {
-      if (fileReferencesEnabled) {
-        wrapBlockCodePathTokens(container);
+    const setAttributeIfChanged = (element: HTMLElement, name: string, value: string) => {
+      if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+    };
+
+    const markFileLink = (candidate: HTMLElement, raw: string, targetPath: string) => {
+      setAttributeIfChanged(candidate, 'data-openchamber-file-link', 'true');
+      setAttributeIfChanged(candidate, 'data-openchamber-file-ref', raw);
+      setAttributeIfChanged(candidate, 'data-openchamber-file-path', targetPath);
+      setAttributeIfChanged(candidate, 'title', 'Open file');
+      if (candidate.tagName.toLowerCase() !== 'a') {
+        setAttributeIfChanged(candidate, 'role', 'button');
+        setAttributeIfChanged(candidate, 'tabindex', '0');
       }
+    };
+
+    // Where a reference opens: its own path once the file is confirmed (a
+    // path outside the workspace is not probed), the one workspace file of a
+    // bare name (`Renderer.tsx:42`, looked up once per name), or nowhere.
+    const resolveTarget = (resolved: ParsedFileReference & { resolvedPath: string }): Promise<string | null> => {
+      if (!isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory)) {
+        return Promise.resolve(resolved.resolvedPath);
+      }
+      const isBareName = !resolved.path.includes('/') && !resolved.path.includes('\\');
+      return fileReferenceExists(resolved.resolvedPath, effectiveDirectory).then((exists) => (
+        exists ? resolved.resolvedPath : isBareName ? findUniqueFileByName(resolved.path, effectiveDirectory) : null
+      ));
+    };
+
+    // One pass: find references, confirm them, then write every link of the
+    // pass at once. Nothing is written for a reference that leads nowhere.
+    const annotateFileLinks = () => {
       const candidates = container.querySelectorAll<HTMLElement>(
         `[data-markdown="inline-code"], a, ${BLOCK_PATH_TOKEN_SELECTOR}`,
       );
       let linkedCount = 0;
-
+      const links: Array<{ candidate: HTMLElement; resolvedPath: string; target: Promise<string | null> }> = [];
+      const unlinked: HTMLElement[] = [];
       for (const candidate of Array.from(candidates)) {
-        const rawCandidate = extractPathCandidateFromElement(candidate);
-        const resolved = getResolvedReference(rawCandidate, effectiveDirectory);
-        clearFileLinkAttributes(candidate);
-
-        if (!resolved) {
+        const resolved = getResolvedReference(extractPathCandidateFromElement(candidate), effectiveDirectory);
+        if (!resolved || linkedCount >= fileReferenceLinkLimit) {
+          unlinked.push(candidate);
           continue;
         }
-
-        if (linkedCount >= fileReferenceLinkLimit) {
-          continue;
-        }
-
         linkedCount += 1;
+        links.push({ candidate, resolvedPath: resolved.resolvedPath, target: resolveTarget(resolved) });
+      }
 
-        const outsideWorkspace = !isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory);
-        // A bare name (`Renderer.tsx:42`) that is not at the root is looked up
-        // by name in the workspace, once per name; only a unique match links.
-        const isBareName = !resolved.path.includes('/') && !resolved.path.includes('\\');
-        const targetPromise: Promise<string | null> = outsideWorkspace
-          ? Promise.resolve(resolved.resolvedPath)
-          : fileReferenceExists(resolved.resolvedPath, effectiveDirectory).then((exists) => (
-            exists ? resolved.resolvedPath : isBareName ? findUniqueFileByName(resolved.path, effectiveDirectory) : null
-          ));
+      const blocks = findBlockCodePathTokens(container).map(({ codeBlock, tokens }) => ({
+        codeBlock,
+        tokens: tokens.flatMap((token) => {
+          const resolved = getResolvedReference(token.raw, effectiveDirectory);
+          if (!resolved || linkedCount >= fileReferenceLinkLimit) return [];
+          linkedCount += 1;
+          return [{ ...token, target: resolveTarget(resolved) }];
+        }),
+      }));
 
-        void targetPromise.then((targetPath) => {
-          if (cancelled || !targetPath || !container.contains(candidate)) {
-            return;
+      writeAnnotations(() => {
+        for (const candidate of unlinked) clearFileLinkAttributes(candidate);
+      });
+      if (links.length === 0 && blocks.length === 0) return;
+
+      void Promise.all([
+        Promise.all(links.map((link) => link.target.then((targetPath) => ({ ...link, targetPath })))),
+        Promise.all(blocks.map(async ({ codeBlock, tokens }) => ({
+          codeBlock,
+          tokens: await Promise.all(tokens.map((token) => token.target.then((targetPath) => ({ ...token, targetPath })))),
+        }))),
+      ]).then(([linkResults, blockResults]) => {
+        if (cancelled) return;
+        writeAnnotations(() => {
+          for (const { candidate, resolvedPath, targetPath } of linkResults) {
+            if (!container.contains(candidate)) continue;
+            const latestRaw = extractPathCandidateFromElement(candidate);
+            if (getResolvedReference(latestRaw, effectiveDirectory)?.resolvedPath !== resolvedPath) continue;
+            if (targetPath) markFileLink(candidate, latestRaw, targetPath);
+            else clearFileLinkAttributes(candidate);
           }
-
-          const latestRawCandidate = extractPathCandidateFromElement(candidate);
-          const latestResolved = getResolvedReference(latestRawCandidate, effectiveDirectory);
-          if (!latestResolved || latestResolved.resolvedPath !== resolved.resolvedPath) {
-            return;
-          }
-
-          candidate.setAttribute('data-openchamber-file-link', 'true');
-          candidate.setAttribute('data-openchamber-file-ref', latestRawCandidate);
-          candidate.setAttribute('data-openchamber-file-path', targetPath);
-          candidate.setAttribute('title', 'Open file');
-          if (candidate.tagName.toLowerCase() !== 'a') {
-            candidate.setAttribute('role', 'button');
-            candidate.setAttribute('tabindex', '0');
+          for (const { codeBlock, tokens } of blockResults) {
+            if (!container.contains(codeBlock) || codeBlock.hasAttribute(CODE_BLOCK_PATH_SCANNED_ATTR)) continue;
+            wrapBlockCodePathTokens(codeBlock, tokens.flatMap(({ start, end, raw, targetPath }) => (
+              targetPath ? [{ start, end, raw, decorate: (span: HTMLElement) => markFileLink(span, raw, targetPath) }] : []
+            )));
           }
         });
-      }
+      });
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1086,6 +1097,20 @@ const useMorphdomMarkdown = ({
     cancelLineNumberTaskRef.current = null;
   }, []);
 
+  // Syntax colours are CSS variables on the content node, set imperatively so
+  // they survive morphdom updates. Set before the content below is inserted:
+  // custom properties inherit, so writing them after the browser styled the
+  // blocks restyled every one of them again, and a session opening paid that
+  // for its whole transcript. Rewriting an unchanged value invalidates nothing.
+  React.useLayoutEffect(() => {
+    const container = containerRef.current;
+    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+    if (!target) return;
+    for (const [key, value] of Object.entries(syntaxVars)) {
+      target.style.setProperty(key, value);
+    }
+  }, [containerRef, syntaxVars]);
+
   React.useLayoutEffect(() => {
     renderRevisionRef.current += 1;
     mountedDomRef.current = null;
@@ -1105,7 +1130,6 @@ const useMorphdomMarkdown = ({
       for (const block of Array.from(target.children)) {
         block.setAttribute(MARKDOWN_DECORATION_ID_ATTR, decorationId);
       }
-      for (const [key, value] of Object.entries(syntaxVars)) target.style.setProperty(key, value);
       applyMarkdownCodeBlockWrapState(target, ctx.codeBlockLineWrap, ctx.labels);
       applyMarkdownTableWrapState(target, ctx.tableCellWrap, ctx.labels);
       mountedDomRef.current = {
@@ -1114,7 +1138,7 @@ const useMorphdomMarkdown = ({
       };
       streamPerfCount('ui.markdown_renderer.dom_cache.hit');
     }
-  }, [containerRef, ctx, domCacheKey, syntaxVars, text.length]);
+  }, [containerRef, ctx, domCacheKey, text.length]);
 
   // Restoration follows the cache identity above, but capture must only happen
   // when this renderer lifecycle ends. Combining both in one keyed effect would
@@ -1356,16 +1380,6 @@ const useMorphdomMarkdown = ({
     if (!container) return;
     return attachMarkdownInteractions(container, ctx);
   }, [containerRef, ctx]);
-
-  // Apply syntax CSS variables imperatively so they survive morphdom updates.
-  React.useEffect(() => {
-    const container = containerRef.current;
-    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
-    if (!target) return;
-    for (const [key, value] of Object.entries(syntaxVars)) {
-      target.style.setProperty(key, value);
-    }
-  }, [containerRef, syntaxVars]);
 
   // DOM painted before the stream ended may still hold code blocks whose
   // numbers were deferred.
