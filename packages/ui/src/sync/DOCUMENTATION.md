@@ -611,7 +611,7 @@ Browser profiling also enables `localStorage.openchamber_stream_perf` to capture
 
 The profiler also emits a user-timing mark when pending global-session recency is committed at a lifecycle edge. `summary.json.longTaskAttribution` correlates that mark with enclosing long tasks without recording session data.
 
-Streaming assistant and reasoning text is throttled once before reaching the markdown renderer. The renderer incrementally reconciles changed markdown blocks but does not add a second character-pacing timer, which would multiply parse/morph work while catching up on large streamed chunks. A message is split into its top-level blocks whether it streams or has settled, and a streamed message is lexed again only from its second-to-last block, so the end of a stream re-renders only the block that was still live; code line numbers deferred during streaming are filled in per block in idle time without shifting the gutter.
+Streaming assistant and reasoning text is throttled once before reaching the markdown renderer. The renderer incrementally reconciles changed markdown blocks but does not add a second character-pacing timer, which would multiply parse/morph work while catching up on large streamed chunks. A message is split into its top-level blocks whether it streams or has settled, and a streamed message is lexed again only from its second-to-last block, so the end of a stream re-renders only the block that was still live. Code line numbers are a CSS counter over Shiki's `.line` spans (`markdown/decorate.ts`, `index.css`), so they show from the first paint, streaming or settled, and add no element per line.
 
 The event pipeline delivers each ordered per-directory flush as one reducer batch. Events retain their individual notifications, cleanup, routing, materialization, and debug side effects, while directory mutations accumulate in order and publish one store transaction per touched directory. Global session mutations and live status, ordering, and timing transitions also accumulate in event order and each owner publishes at most once for the flush. Each top-level state slice is cloned lazily at most once in that batch; no-op events do not change references.
 
@@ -957,7 +957,7 @@ until the viewport is in place, and a remembered position whose message must
 first be loaded raises the cap (below). Markdown does not hold it. Its first
 paint for blocks not yet in the settled cache is unhighlighted, and it is shown
 as is: it already has the final geometry, because the highlight pass only
-colours code lines (same line rows, gutter, header and classes; covered by
+colours code lines (same `.line` elements, gutter, header and classes; covered by
 `markdown/provisionalPaintGeometry.test.ts`), and tables get their measured
 column widths synchronously on that first paint and again in the same task
 whenever the highlighted markup replaces them. The timeline root stays at

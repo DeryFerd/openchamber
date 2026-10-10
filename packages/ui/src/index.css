@@ -1659,24 +1659,58 @@ html:not(.dark) .chat-scroll {
   background: transparent !important;
 }
 
-/* The marked renderer uses its own code-body wrapper instead of Streamdown's. */
+/* The marked renderer uses its own code-body wrapper instead of Streamdown's.
+   The code element keeps its background image: the gutter rule below. */
 .markdown-content [data-md-code-body],
-.markdown-content [data-md-code-body] pre,
-.markdown-content [data-md-code-body] code,
-.markdown-content [data-md-code-body] [data-md-code-lines] {
+.markdown-content [data-md-code-body] pre {
   background: transparent !important;
 }
 
-.markdown-content [data-md-code-lines] {
-  display: block;
-  min-width: 100%;
+.markdown-content [data-md-code-body] code {
+  background-color: transparent !important;
 }
 
-.markdown-content [data-md-code-line] {
-  display: grid;
-  grid-template-columns: 2rem minmax(0, 1fr);
-  column-gap: 0.75rem;
-  min-width: 100%;
+/* Line numbers are a counter over Shiki's `.line` spans, so a code line
+   carries no element of its own for its number. The gutter is a 2rem column
+   with a 0.75rem gap before the code; its rule is a background line on the
+   code element, so it runs unbroken past wrapped rows. A wrapped line keeps
+   its number on its first row. The number is generated content: selection,
+   copy and the accessibility tree never see it. */
+.markdown-content [data-md-code-lines] {
+  display: block;
+  padding-left: 2.75rem;
+  counter-reset: md-code-line;
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--border) 50%, transparent),
+    color-mix(in srgb, var(--border) 50%, transparent)
+  );
+  background-repeat: no-repeat;
+  background-position: calc(2rem - 1px) 0;
+  background-size: 1px 100%;
+}
+
+.markdown-content [data-md-code-lines] > .line {
+  counter-increment: md-code-line;
+}
+
+/* The empty line Shiki draws after a trailing line break is not a line. */
+.markdown-content [data-md-code-lines] > .line:last-child:empty:not(:first-child) {
+  display: none;
+}
+
+.markdown-content [data-md-code-lines] > .line::before {
+  content: counter(md-code-line);
+  content: counter(md-code-line) / '';
+  float: left;
+  width: 2rem;
+  margin-left: -2.75rem;
+  /* The 1px stands for the rule, which sits inside the column. */
+  padding-right: calc(0.75rem + 1px);
+  color: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+  white-space: nowrap;
 }
 
 /* First uncached open of a session shows a hydration skeleton; the real
@@ -1774,42 +1808,11 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* While streaming defers the per-line gutter markup, hold its horizontal
-   footprint (2rem column + 0.75rem gap) so the finished pass only fills in
-   the numbers instead of shifting every code line. */
-.markdown-content pre[data-md-gutter-reserved] > code {
-  display: block;
-  padding-left: 2.75rem;
-}
-
-.markdown-content [data-md-code-line-number] {
-  align-self: stretch;
-  padding-right: 0.75rem;
-  border-right: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-  color: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  user-select: none;
-  white-space: nowrap;
-}
-
-.markdown-content [data-md-code-line-number]::before {
-  content: attr(data-md-code-line-number);
-}
-
-.markdown-content [data-md-code-line-content] {
-  min-width: 0;
-}
-
-.markdown-content [data-md-code-line-break] {
-  display: none;
-}
-
 [data-message-image-export="true"] [data-md-code-body] {
   overflow: visible !important;
 }
 
-[data-message-image-export="true"] [data-md-code-line-content] {
+[data-message-image-export="true"] [data-md-code-lines] {
   white-space: pre-wrap !important;
   overflow-wrap: anywhere !important;
 }

@@ -8,8 +8,8 @@ import type { DecorateContext } from './decorate';
 // for it). That is only acceptable while the highlighted paint lays out
 // exactly like the provisional one, so the chat cannot jump when colours land.
 // These tests compare the two decorated DOMs on everything that sizes a code
-// block: line rows and gutter, header, classes, inline layout styles, and the
-// text of every line.
+// block: its line elements (the gutter counts them), header, classes, inline
+// layout styles, and the text of every line.
 
 const win = new Window({ url: 'https://openchamber.test/' });
 Object.assign(globalThis, {
@@ -98,7 +98,6 @@ const layoutStyle = (element: HTMLElement | null) => ({
 const codeBlockGeometry = (wrapper: HTMLElement) => {
   const pre = wrapper.querySelector<HTMLElement>('pre');
   const code = wrapper.querySelector<HTMLElement>('pre > code');
-  const rows = Array.from(wrapper.querySelectorAll<HTMLElement>('[data-md-code-line]'));
   return {
     wrapperClasses: layoutClasses(wrapper),
     wrapperState: wrapper.getAttribute('data-code-wrap'),
@@ -110,17 +109,14 @@ const codeBlockGeometry = (wrapper: HTMLElement) => {
     bodyClasses: layoutClasses(wrapper.querySelector('[data-md-code-body]')),
     preClasses: layoutClasses(pre),
     preStyle: layoutStyle(pre),
-    preGutterReserved: pre?.hasAttribute('data-md-gutter-reserved'),
     codeClasses: layoutClasses(code),
     codeStyle: layoutStyle(code),
     codeLines: code?.hasAttribute('data-md-code-lines'),
-    trailingNewline: code?.hasAttribute('data-md-code-trailing-newline'),
-    rows: rows.map((row) => ({
-      number: row.querySelector('[data-md-code-line-number]')?.getAttribute('data-md-code-line-number'),
-      text: row.querySelector('[data-md-code-line-content]')?.textContent,
-      contentStyle: layoutStyle(row.querySelector<HTMLElement>('[data-md-code-line-content]')),
-    })),
-    lineBreaks: wrapper.querySelectorAll('[data-md-code-line-break]').length,
+    // Every child: a `.line` with its text and inline layout style, or a
+    // line break between two of them.
+    children: Array.from(code?.childNodes ?? [], (node) => (node instanceof HTMLElement
+      ? { classes: layoutClasses(node), text: node.textContent, style: layoutStyle(node) }
+      : { text: node.textContent })),
   };
 };
 
@@ -168,8 +164,8 @@ describe('provisional markdown paint geometry', () => {
       expect(provisionalBlocks).toHaveLength(5);
       expect(highlightedBlocks).toHaveLength(provisionalBlocks.length);
       // The highlighted paint really is a different DOM: coloured tokens.
-      expect(highlighted.querySelector('[data-md-code-line-content] span[style]')).not.toBeNull();
-      expect(provisional.querySelector('[data-md-code-line-content] span[style]')).toBeNull();
+      expect(highlighted.querySelector('pre > code > .line span[style]')).not.toBeNull();
+      expect(provisional.querySelector('pre > code > .line span[style]')).toBeNull();
 
       provisionalBlocks.forEach((block, index) => {
         const target = highlightedBlocks[index];

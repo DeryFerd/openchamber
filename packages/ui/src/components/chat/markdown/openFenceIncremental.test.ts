@@ -67,8 +67,6 @@ const ctx = {
   codeBlockLineWrap: false,
   tableCellWrap: false,
   renderMermaid: () => ({}),
-  // Streaming: the gutter is reserved, numbers come after the stream.
-  deferCodeLineNumberSync: true,
 };
 
 type Rendered = Awaited<ReturnType<typeof renderMarkdownBlocks>>;
@@ -297,15 +295,11 @@ describe('createOpenFenceRenderer', () => {
     expect(patch).toBeTruthy();
     if (!patch) return;
 
-    const laidOut = paint(first.html);
-    laidOut.querySelector('code')?.setAttribute('data-md-code-lines', '');
-    const laidOutHtml = laidOut.innerHTML;
-    expect(applyOpenFencePatch(laidOut, patch)).toBe(false);
-    expect(laidOut.innerHTML).toBe(laidOutHtml);
-
     const extraLine = paint(first.html);
     extraLine.querySelector('code')?.append(document.createElement('span'));
+    const extraLineHtml = extraLine.innerHTML;
     expect(applyOpenFencePatch(extraLine, patch)).toBe(false);
+    expect(extraLine.innerHTML).toBe(extraLineHtml);
 
     const ok = paint(first.html);
     expect(applyOpenFencePatch(ok, patch)).toBe(true);

@@ -175,6 +175,19 @@ export const createOpenFenceRenderer = (sanitize: (html: string) => string) => {
 };
 
 /**
+ * Shiki ends code that ends in a line break with one more, empty line; for some
+ * languages it holds an empty token span. Emptied, it matches the stylesheet's
+ * `:empty` rule, which hides it so it gets no number of its own.
+ */
+export const emptyTrailingCodeLine = (code: Element): void => {
+  const last = code.lastElementChild;
+  if (last && last !== code.firstElementChild && last.classList.contains('line')
+    && last.firstChild && last.textContent === '') {
+    last.replaceChildren();
+  }
+};
+
+/**
  * Applies `patch` to a block painted from an earlier step of the same fence:
  * its finished lines stay, the rest is replaced. False, with the block
  * untouched, when it does not have the shape the patch was made for.
@@ -183,8 +196,7 @@ export const applyOpenFencePatch = (block: HTMLElement, patch: OpenFencePatch): 
   const pres = block.getElementsByTagName('pre');
   const pre = pres.length === 1 ? pres[0] : undefined;
   const code = pre?.firstElementChild;
-  // Line numbers laid out (a settled decoration) put each line in a row.
-  if (!pre || !code || code.tagName !== 'CODE' || code !== pre.lastElementChild || code.hasAttribute('data-md-code-lines')) return false;
+  if (!pre || !code || code.tagName !== 'CODE' || code !== pre.lastElementChild) return false;
   // Line elements separated by single line-break text nodes, nothing else.
   if (code.children.length !== patch.expectLines || code.childNodes.length !== patch.expectLines * 2 - 1) return false;
   const first = code.children[patch.keepLines];
@@ -193,5 +205,6 @@ export const applyOpenFencePatch = (block: HTMLElement, patch: OpenFencePatch): 
   first.remove();
   // `patch.html` is sanitized; see createOpenFenceRenderer.
   code.insertAdjacentHTML('beforeend', patch.html);
+  emptyTrailingCodeLine(code);
   return true;
 };

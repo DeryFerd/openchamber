@@ -36,9 +36,6 @@ import {
   applyMarkdownCodeBlockWrapState,
   applyMarkdownTableWrapState,
   decorateMarkdown,
-  getMarkdownCodeText,
-  layoutReservedCodeLines,
-  RESERVED_CODE_GUTTER_SELECTOR,
   stabilizeMarkdownTableWidths,
   type DecorateContext,
   type DecorateLabels,
@@ -292,7 +289,8 @@ const findBlockCodePathTokens = (container: HTMLElement): Array<{ codeBlock: HTM
     if (codeBlock.hasAttribute(CODE_BLOCK_PATH_SCANNED_ATTR)) continue;
     const tokens: BlockCodePathToken[] = [];
     // Skip absurdly large code blocks to keep the scan bounded.
-    const fullText = (codeBlock.textContent ?? '').length > MAX_BLOCK_CODE_SCAN_LENGTH ? '' : getMarkdownCodeText(codeBlock);
+    const codeText = codeBlock.textContent ?? '';
+    const fullText = codeText.length > MAX_BLOCK_CODE_SCAN_LENGTH ? '' : codeText;
     if (fullText.includes('.')) {
       for (const match of fullText.matchAll(BLOCK_PATH_TOKEN_RE)) {
         const raw = match[0];
@@ -317,9 +315,9 @@ const wrapBlockCodePathTokens = (
     const walker = doc.createTreeWalker(codeBlock, NodeFilter.SHOW_TEXT);
     const textNodes: Text[] = [];
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (node instanceof Text && !node.parentElement?.closest('[data-md-code-line-number]')) textNodes.push(node);
+      if (node instanceof Text) textNodes.push(node);
     }
-    const fullText = getMarkdownCodeText(codeBlock);
+    const fullText = codeBlock.textContent ?? '';
     for (const { start, end, raw, decorate } of [...confirmed].sort((left, right) => right.start - left.start)) {
       if (fullText.slice(start, end) !== raw) continue;
       const startPosition = findTextPosition(textNodes, start, 'right');
@@ -781,17 +779,6 @@ const markLastMarkdownBlock = (target: HTMLElement): void => {
   }
 };
 
-// Safari has no requestIdleCallback; there a short timeout stands in and one
-// block is handled per task.
-const scheduleIdle = (run: (deadline?: IdleDeadline) => void): (() => void) => {
-  if ('requestIdleCallback' in window) {
-    const handle = window.requestIdleCallback(run, { timeout: 500 });
-    return () => window.cancelIdleCallback(handle);
-  }
-  const handle = setTimeout(() => run(), 16);
-  return () => clearTimeout(handle);
-};
-
 const BLOCK_ENTER_CLASS = 'oc-md-block-enter';
 
 /**
@@ -885,7 +872,6 @@ const readCopyFormat = (): RenderedCopyFormat => (
 
 const useDecorateContext = (
   currentTheme: Theme,
-  deferCodeLineNumberSync: boolean,
   onPreviewLoopback?: (url: string) => void,
   mermaidControls: MermaidControlOptions = DEFAULT_MERMAID_CONTROLS,
 ): DecorateContext => {
@@ -945,15 +931,7 @@ const useDecorateContext = (
     };
   }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, toggleCodeBlockLineWrap, tableCellWrap, toggleTableCellWrap, onPreviewLoopback]);
 
-  // Streaming only defers code line numbers, which the settled pass fills in
-  // per block. Both variants share one decoration identity, so a finished
-  // stream keeps every block's DOM instead of decorating the reply again.
-  const streamingCtx = React.useMemo<DecorateContext>(() => {
-    const variant = { ...ctx, deferCodeLineNumberSync: true };
-    MARKDOWN_DECORATION_IDS.set(variant, getMarkdownDecorationId(ctx));
-    return variant;
-  }, [ctx]);
-  return deferCodeLineNumberSync ? streamingCtx : ctx;
+  return ctx;
 };
 
 // Runs the async render pipeline into the container and keeps a stable
@@ -1056,45 +1034,6 @@ const useMorphdomMarkdown = ({
     if (frame === null) return;
     window.cancelAnimationFrame(frame);
     tableLayoutFrameRef.current = null;
-  }, []);
-
-  // Code blocks decorated while streaming reserve the line-number gutter but
-  // leave out the numbers. Once the message settles, the numbers are filled in
-  // one block at a time in idle time, not all in the task that ends the stream.
-  const latestCtxRef = React.useRef(ctx);
-  const streamingRef = React.useRef(streaming);
-  React.useLayoutEffect(() => {
-    latestCtxRef.current = ctx;
-    streamingRef.current = streaming;
-  }, [ctx, streaming]);
-  const cancelLineNumberTaskRef = React.useRef<(() => void) | null>(null);
-  const scheduleCodeLineNumbers = React.useCallback(() => {
-    if (cancelLineNumberTaskRef.current) return;
-    const run = (deadline?: IdleDeadline) => {
-      cancelLineNumberTaskRef.current = null;
-      if (streamingRef.current) return;
-      const container = containerRef.current;
-      const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
-      if (!target) return;
-      const pending = target.querySelectorAll<HTMLPreElement>(RESERVED_CODE_GUTTER_SELECTOR);
-      let done = 0;
-      do {
-        const pre = pending[done];
-        if (!pre) break;
-        // Laying out lines rebuilds plain code text, which would drop file
-        // links already found in it; unwrap them so the annotation pass,
-        // woken by this mutation, finds them again.
-        if (pre.querySelector(`code[${CODE_BLOCK_PATH_SCANNED_ATTR}]`)) unwrapBlockCodePathTokens(pre);
-        layoutReservedCodeLines(pre, latestCtxRef.current);
-        done += 1;
-      } while (deadline && deadline.timeRemaining() > 4);
-      if (done < pending.length) cancelLineNumberTaskRef.current = scheduleIdle(run);
-    };
-    cancelLineNumberTaskRef.current = scheduleIdle(run);
-  }, [containerRef]);
-  React.useEffect(() => () => {
-    cancelLineNumberTaskRef.current?.();
-    cancelLineNumberTaskRef.current = null;
   }, []);
 
   // Syntax colours are CSS variables on the content node, set imperatively so
@@ -1233,7 +1172,6 @@ const useMorphdomMarkdown = ({
           ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
           : null;
         streamPerfCount('ui.markdown_renderer.settled_paint.reused');
-        scheduleCodeLineNumbers();
         scheduleTableLayout();
         return;
       }
@@ -1365,7 +1303,6 @@ const useMorphdomMarkdown = ({
       mountedDomRef.current = domCacheKey
         ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
         : null;
-      if (!streaming) scheduleCodeLineNumbers();
       if (resetsMeasuredTables) layoutTablesNow();
       else scheduleTableLayout();
     });
@@ -1373,20 +1310,13 @@ const useMorphdomMarkdown = ({
     return () => {
       active = false;
     };
-  }, [containerRef, ctx, domCacheKey, growing, imageMode, rawHtml, refreshMermaidViewers, layoutTablesNow, scheduleCodeLineNumbers, scheduleTableLayout, streaming, tableLayoutSettled, text]);
+  }, [containerRef, ctx, domCacheKey, growing, imageMode, rawHtml, refreshMermaidViewers, layoutTablesNow, scheduleTableLayout, streaming, tableLayoutSettled, text]);
 
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     return attachMarkdownInteractions(container, ctx);
   }, [containerRef, ctx]);
-
-  // DOM painted before the stream ended may still hold code blocks whose
-  // numbers were deferred.
-  React.useEffect(() => {
-    if (!streaming) scheduleCodeLineNumbers();
-  }, [scheduleCodeLineNumbers, streaming]);
-
 };
 
 const markdownContentClassName = (variant: MarkdownVariant): string =>
@@ -1441,7 +1371,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   useLinkInteractions({ containerRef });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
-  const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
+  const ctx = useDecorateContext(currentTheme, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
   const { locale } = useI18n();
   // Assistant images live in the gallery under the message; tool output and
   // reasoning draw local images and link remote ones (see MarkdownImageMode).
@@ -1569,7 +1499,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   useLinkInteractions({ containerRef, enabled: !disableLinkSafety });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
-  const ctx = useDecorateContext(currentTheme, false, undefined, mermaidControls);
+  const ctx = useDecorateContext(currentTheme, undefined, mermaidControls);
 
   useMorphdomMarkdown({
     containerRef,
