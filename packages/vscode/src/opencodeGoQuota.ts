@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-type OpenCodeGoApiKeyCredential = { apiKey: string };
+// `consoleKey` marks a key from the shared `opencode` integration.
+export type OpenCodeGoApiKeyCredential = { apiKey: string; consoleKey: boolean };
 export type OpenCodeGoConsoleCredential = { accessToken: string; orgID: string; expires?: number | null };
 type OpenCodeGoCredential = OpenCodeGoApiKeyCredential | OpenCodeGoConsoleCredential;
 
@@ -12,6 +13,7 @@ const CONSOLE_STATUS_URL = 'https://opencode.ai/console/api/go/status';
 const CONSOLE_BILLING_STATUS_URL = 'https://opencode.ai/console/api/billing/status';
 const MICRO_CENTS_PER_DOLLAR = 1_000_000;
 const CONSOLE_PRODUCTS = new Set(['go', 'go-plus']);
+const NO_CONSOLE_SUBSCRIPTION = 'No active OpenCode Go subscription on the selected Console account';
 
 // The Console and legacy Go endpoints report amounts as decimal strings (the
 // Console uses integer micro-cents), so both schemas decode them once at the
@@ -119,6 +121,10 @@ const parseConsoleUsage = (payload: OpenCodeGoConsoleStatus) => {
 
 const fetchApiKeyUsage = async (credential: OpenCodeGoApiKeyCredential) => {
   const response = await fetch(API_KEY_USAGE_URL, { headers: { Accept: 'application/json', Authorization: `Bearer ${credential.apiKey}`, 'x-opencode-session': 'openchamber-usage' }, signal: AbortSignal.timeout(15_000) });
+  // The usage API accepts any key of a Console workspace and answers 403 when
+  // that workspace has no Go subscription, so for a Console key a 403 is an
+  // absent subscription rather than a bad key.
+  if (response.status === 403 && credential.consoleKey) throw new Error(NO_CONSOLE_SUBSCRIPTION);
   if (response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) throw new Error('OpenCode Go authentication failed');
   if (!response.ok) throw new Error(`OpenCode Go usage API returned HTTP ${response.status}`);
   const parsed = apiKeyStatusSchema.safeParse(await response.json().catch(() => null));
@@ -167,7 +173,7 @@ const fetchConsoleUsage = async (credential: OpenCodeGoConsoleCredential) => {
   if (!response.ok) throw new Error(`OpenCode Console Go status API returned HTTP ${response.status}`);
   const parsed = consoleStatusSchema.safeParse(await response.json().catch(() => null));
   if (!parsed.success) throw new Error('OpenCode Console Go status returned an unreadable response');
-  if (!parsed.data.product || !CONSOLE_PRODUCTS.has(parsed.data.product)) throw new Error('No active OpenCode Go subscription on the selected Console account');
+  if (!parsed.data.product || !CONSOLE_PRODUCTS.has(parsed.data.product)) throw new Error(NO_CONSOLE_SUBSCRIPTION);
   const windows = parseConsoleUsage(parsed.data);
   if (!Object.keys(windows).length) throw new Error('OpenCode Go usage data could not be parsed');
   const balance = await balanceRead;

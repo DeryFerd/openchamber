@@ -3,7 +3,7 @@ import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { fetchOpenCodeGoUsage, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
+import { fetchOpenCodeGoUsage, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { readOpenCodeCredentials } from './opencodeAuth';
 import { readConfig } from './opencodeConfig';
@@ -435,6 +435,20 @@ const openCodeGoConsoleCredential = (auth: AuthFile): OpenCodeGoConsoleCredentia
   return { accessToken, orgID, expires };
 };
 
+// A key on `opencode-go` comes first. Otherwise an API key on the shared
+// `opencode` integration serves Go too: OpenCode loads the Console workspace's
+// providers with it and binds OpenCode Go to that integration when the
+// workspace has Go. Providers lists it under OpenCode Go too.
+const openCodeGoApiKey = (auth: AuthFile): OpenCodeGoApiKeyCredential | null => {
+  const own = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
+  const ownKey = asNonEmptyString(own?.key) ?? asNonEmptyString(own?.token);
+  if (ownKey) return { apiKey: ownKey, consoleKey: false };
+  const consoleEntry = normalizeAuthEntry(getAuthEntry(auth, ['opencode']));
+  if (!consoleEntry || consoleEntry.type === 'oauth') return null;
+  const consoleKey = asNonEmptyString(consoleEntry.key) ?? asNonEmptyString(consoleEntry.token);
+  return consoleKey ? { apiKey: consoleKey, consoleKey: true } : null;
+};
+
 const formatResetTime = (timestamp: number) => {
   try {
     const resetDate = new Date(timestamp);
@@ -794,9 +808,7 @@ const getKimiApiKey = (auth: AuthFile) => {
 export const listConfiguredQuotaProviders = async () => {
   const auth = await readOpenCodeCredentials();
   const configured = new Set<string>();
-  const openCodeGoAuth = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
-  if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
-  if (openCodeGoConsoleCredential(auth)) configured.add('opencode-go');
+  if (openCodeGoApiKey(auth) || openCodeGoConsoleCredential(auth)) configured.add('opencode-go');
   if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
   if (readCredential('cursor')) configured.add('cursor');
   if (readCredential('exe-dev')) configured.add('exe-dev');
@@ -3842,12 +3854,10 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
         deleteLegacyOpenCodeGoCredential();
         const auth = await readOpenCodeCredentials();
         // A Console sign-in serves OpenCode Go once it exists; the
-        // `opencode-go` service key is the fallback for accounts without one,
-        // and for a Console read that fails (no Go in that org, an endpoint
-        // change, a hiccup).
+        // API key is the fallback for accounts without one, and for a Console
+        // read that fails (no Go in that org, an endpoint change, a hiccup).
         const consoleCredential = openCodeGoConsoleCredential(auth);
-        const entry = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
-        const apiKey = typeof entry?.key === 'string' ? entry.key : typeof entry?.token === 'string' ? entry.token : null;
+        const apiKey = openCodeGoApiKey(auth);
         if (consoleCredential) {
           try {
             return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(consoleCredential) } });
@@ -3856,7 +3866,7 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
           }
         }
         if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
-        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage({ apiKey }) } });
+        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(apiKey) } });
       } catch (error) {
         return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
       }

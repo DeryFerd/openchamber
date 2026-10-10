@@ -140,6 +140,39 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
     assert.throws(() => fs.statSync(legacyPath));
   });
+
+  // OpenCode binds OpenCode Go to the Console's `opencode` integration when the
+  // key's workspace has Go, and Providers lists that key under OpenCode Go.
+  describe('with an API key on the Console integration only', () => {
+    beforeEach(() => {
+      configureOpenCodeCredentials({ list: async () => [key('opencode')] });
+    });
+
+    afterEach(() => {
+      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+    });
+
+    test('reads the usage with that key', async () => {
+      let request: RequestInit | undefined;
+      stubFetchReturning(async (_url, init) => {
+        request = init;
+        return mockResponse({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } });
+      });
+
+      const result = await fetchQuotaForProvider('opencode-go');
+
+      assert.equal(result.ok, true);
+      assert.equal(new Headers(request?.headers).get('Authorization'), 'Bearer test-token');
+      assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
+    });
+
+    test('reports an absent subscription on a 403', async () => {
+      stubFetchReturning(async () => mockResponse({}, { ok: false, status: 403 }));
+      const result = await fetchQuotaForProvider('opencode-go');
+      assert.equal(result.configured, true);
+      assert.equal(result.error, 'No active OpenCode Go subscription on the selected Console account');
+    });
+  });
 });
 
 describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => {

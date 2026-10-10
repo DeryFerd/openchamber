@@ -16,10 +16,11 @@ export const providerId = 'opencode-go';
 export const providerName = 'OpenCode Go';
 const aliases = ['opencode-go'];
 
-// OpenCode Go has two credential shapes. A service-account key stored under the
-// `opencode-go` integration uses the legacy usage API. A Console sign-in lives
-// on the shared `opencode` integration and its OAuth access token is not
-// interchangeable with that key, so it uses the Console Go status endpoint.
+// OpenCode Go has two credential shapes. An API key, stored under the
+// `opencode-go` integration or the shared `opencode` one, uses the legacy usage
+// API. A Console sign-in lives on the shared `opencode` integration and its
+// OAuth access token is not interchangeable with that key, so it uses the
+// Console Go status endpoint.
 const API_KEY_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
 const CONSOLE_STATUS_URL = 'https://opencode.ai/console/api/go/status';
 // The Go status response carries only the three meters. The spendable credit
@@ -31,6 +32,7 @@ const CONSOLE_SERVER = 'https://opencode.ai/console';
 const CONSOLE_INTEGRATION_ID = 'opencode';
 const ORGANIZATION_ID_PATTERN = /^org_[A-Za-z0-9]+$/;
 const CONSOLE_PRODUCTS = new Set(['go', 'go-plus']);
+const NO_CONSOLE_SUBSCRIPTION = 'No active OpenCode Go subscription on the selected Console account';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 const API_KEY_WINDOW_FIELDS = {
@@ -112,7 +114,13 @@ export const parseConsoleBillingBalance = (payload) => {
   return microCents / MICRO_CENTS_PER_DOLLAR;
 };
 
-export const fetchOpenCodeGoUsage = async (apiKey, fetchImpl = fetch) => {
+/**
+ * `consoleKey` marks a key from the shared `opencode` integration. The usage
+ * API accepts any key of a Console workspace and answers 403 when that
+ * workspace has no Go subscription, so for such a key a 403 is an absent
+ * subscription rather than a bad key.
+ */
+export const fetchOpenCodeGoUsage = async (apiKey, fetchImpl = fetch, { consoleKey = false } = {}) => {
   const response = await fetchImpl(API_KEY_USAGE_URL, {
     headers: {
       Accept: 'application/json',
@@ -122,6 +130,7 @@ export const fetchOpenCodeGoUsage = async (apiKey, fetchImpl = fetch) => {
     },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
+  if (response.status === 403 && consoleKey) throw new Error(NO_CONSOLE_SUBSCRIPTION);
   if (response.status === 401 || response.status === 403) {
     throw new Error('OpenCode Go authentication failed');
   }
@@ -156,7 +165,7 @@ export const fetchConsoleGoUsage = async ({ access, orgID, expires }, fetchImpl 
   const payload = await response.json().catch(() => null);
   if (!asObject(payload)) throw new Error('OpenCode Console Go status returned an unreadable response');
   if (!CONSOLE_PRODUCTS.has(payload.product)) {
-    throw new Error('No active OpenCode Go subscription on the selected Console account');
+    throw new Error(NO_CONSOLE_SUBSCRIPTION);
   }
   const windows = parseConsoleGoUsage(payload);
   if (Object.keys(windows).length === 0) throw new Error('OpenCode Go usage data could not be parsed');
@@ -190,9 +199,22 @@ export const fetchConsoleBillingBalance = async ({ access, orgID }, fetchImpl = 
   }
 };
 
+const readKey = (entry) => asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+
+/**
+ * The key for the usage API. A key on `opencode-go` comes first. Otherwise an
+ * API key on the shared `opencode` integration serves Go too: OpenCode loads
+ * the Console workspace's providers with it and binds OpenCode Go to that
+ * integration when the workspace has Go. Providers lists it under OpenCode Go
+ * too.
+ */
 const getApiKey = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+  const own = readKey(normalizeAuthEntry(getAuthEntry(auth, aliases)));
+  if (own) return { key: own, consoleKey: false };
+  const consoleEntry = normalizeAuthEntry(getAuthEntry(auth, [CONSOLE_INTEGRATION_ID]));
+  if (!consoleEntry || consoleEntry.type === 'oauth') return null;
+  const key = readKey(consoleEntry);
+  return key ? { key, consoleKey: true } : null;
 };
 
 /**
@@ -219,8 +241,10 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
     deleteLegacyOpenCodeGoCredential();
     const auth = await readAuth();
     // A Console sign-in serves OpenCode Go once it exists; the `opencode-go`
-    // service key is the fallback for accounts without one, and for a Console
-    // read that fails (no Go in that org, an endpoint change, a hiccup).
+    // API key is the fallback for accounts without one, and for a Console read
+    // that fails (no Go in that org, an endpoint change, a hiccup). An API key
+    // on `opencode` cannot coexist with the sign-in: one credential is active
+    // per integration.
     const consoleCredential = getConsoleCredential(auth);
     const apiKey = getApiKey(auth);
     if (consoleCredential) {
@@ -247,7 +271,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       }
     }
     if (!apiKey) return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });
-    const windows = await fetchOpenCodeGoUsage(apiKey, fetchImpl);
+    const windows = await fetchOpenCodeGoUsage(apiKey.key, fetchImpl, { consoleKey: apiKey.consoleKey });
     return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows } });
   } catch (error) {
     return buildResult({ providerId, providerName, ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });

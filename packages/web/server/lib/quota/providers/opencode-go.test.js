@@ -135,6 +135,37 @@ describe('OpenCode Go quota provider — legacy API key', () => {
     expect(result.ok).toBe(true);
     expect(fetchImpl.mock.calls[0][0]).toBe('https://opencode.ai/zen/go/v1/usage');
   });
+
+  // OpenCode binds OpenCode Go to the Console's `opencode` integration when the
+  // key's workspace has Go, and Providers lists that key under OpenCode Go.
+  it('reads an API key stored on the Console integration when OpenCode Go has none', async () => {
+    const auth = { opencode: { type: 'api', key: 'console-key' } };
+    expect(isConfigured(auth)).toBe(true);
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } })));
+    const result = await fetchQuota({ readAuth: async () => auth, fetchImpl });
+    expect(result).toMatchObject({ providerId: 'opencode-go', ok: true, configured: true });
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://opencode.ai/zen/go/v1/usage');
+    expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer console-key');
+  });
+
+  it('prefers the OpenCode Go key over a key on the Console integration', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } })));
+    await fetchQuota({ readAuth: async () => ({ opencode: { type: 'api', key: 'console-key' }, ...apiKeyAuth() }), fetchImpl });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer test-key');
+  });
+
+  it('reports an absent subscription when the Console key has no Go', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ type: 'error', error: { type: 'EntitlementError' } }), { status: 403 }));
+    const result = await fetchQuota({ readAuth: async () => ({ opencode: { type: 'api', key: 'console-key' } }), fetchImpl });
+    expect(result).toMatchObject({ ok: false, configured: true, error: 'No active OpenCode Go subscription on the selected Console account' });
+  });
+
+  it('reports a rejected Console key as an authentication failure', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('', { status: 401 }));
+    const result = await fetchQuota({ readAuth: async () => ({ opencode: { type: 'api', key: 'console-key' } }), fetchImpl });
+    expect(result).toMatchObject({ ok: false, configured: true, error: 'OpenCode Go authentication failed' });
+  });
 });
 
 describe('OpenCode Go quota provider — Console OAuth', () => {
