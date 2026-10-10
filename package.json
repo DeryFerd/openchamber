@@ -101,6 +101,7 @@
     "profile:compare": "node scripts/profile-compare.mjs",
     "profile:heap": "node scripts/profile-heap.mjs",
     "profile:composer": "node scripts/profile-composer.mjs",
+    "profile:toggle": "node scripts/profile-toggle.mjs",
     "profile:serve": "node scripts/perf/isolated-server.mjs",
     "profile:analyze": "node scripts/perf/analyze-run.mjs"
   },

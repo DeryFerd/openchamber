@@ -17,11 +17,10 @@
 
 import { mkdirSync } from "node:fs"
 import { writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import process from "node:process"
 
-import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
+import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "./perf/cdp.mjs"
 import { percentile, round } from "./perf/metrics.mjs"
 
 const HELP = `Usage: bun run profile:composer -- [options]
@@ -39,14 +38,15 @@ Options:
                            (default: artifacts/composer-profile-<time>)
   --label <text>           Human label stored in the summary
   --chrome <path>          Chrome/Chromium executable
-  --profile-dir <path>     Chrome profile (default: ~/.cache/openchamber-perf-composer-profile)
+  --profile-dir <path>     Chrome profile to reuse (default: a fresh temporary
+                           profile per run, removed afterwards)
   --headed                 Show the browser (default: headless)
   --help                   Show this help
 
 Needs a running OpenChamber server; see scripts/perf/DOCUMENTATION.md.`
 
 const parseArgs = (argv) => {
-  const options = { url: "http://localhost:3000", session: null, lines: 6, settle: 14, output: null, label: null, chrome: null, profileDir: join(homedir(), ".cache", "openchamber-perf-composer-profile"), headless: true }
+  const options = { url: "http://localhost:3000", session: null, lines: 6, settle: 14, output: null, label: null, chrome: null, profileDir: null, headless: true }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
     if (value === "--help") { console.log(HELP); process.exit(0) }
@@ -72,11 +72,12 @@ const main = async () => {
   const options = parseArgs(process.argv.slice(2))
   const output = resolve(options.output ?? join("artifacts", `composer-profile-${new Date().toISOString().replace(/[:.]/g, "-")}`))
   mkdirSync(output, { recursive: true })
-  mkdirSync(options.profileDir, { recursive: true })
+  const profile = resolveProfileDir(options.profileDir, "composer")
+  mkdirSync(profile.dir, { recursive: true })
   const url = new URL(options.url)
   if (options.session) url.searchParams.set("session", options.session)
   const port = await reservePort()
-  const chrome = launchChrome({ chrome: resolveChrome(options.chrome), profileDir: options.profileDir, port, headless: options.headless })
+  const chrome = launchChrome({ chrome: resolveChrome(options.chrome), profileDir: profile.dir, port, headless: options.headless })
   const events = []
   let client
   try {
@@ -185,6 +186,7 @@ const main = async () => {
   } finally {
     client?.close()
     chrome.kill("SIGTERM")
+    profile.removeAfter(chrome)
   }
 }
 

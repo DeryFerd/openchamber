@@ -22,11 +22,10 @@
  */
 
 import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import process from "node:process"
 
-import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
+import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "./perf/cdp.mjs"
 import { buildIdleProbeSource, IDLE_PROBE_GLOBAL } from "./perf/idle-probe.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
 import { buildRenderProbeSource, printRenderProbe, readRenderProbe, RENDER_PROBE_GLOBAL, summarizeRenderProbe } from "./perf/render-probe.mjs"
@@ -60,7 +59,8 @@ Options:
   --output <directory>     Artifact directory (default: artifacts/idle-profile-<time>)
   --label <text>           Human label stored in the summary
   --chrome <path>          Chrome/Chromium executable
-  --profile-dir <path>     Reusable isolated Chrome profile
+  --profile-dir <path>     Chrome profile to reuse (default: a fresh temporary
+                           profile per run, removed afterwards)
   --headed                 Show the browser (default: headless)
   --sampling-interval <us> CPU sampler interval in microseconds (default: 200)
   --inject-script <file>   Run a script in the page before it loads. For
@@ -97,7 +97,7 @@ const parseArgs = (argv) => {
     output: null,
     label: null,
     chrome: null,
-    profileDir: join(homedir(), ".openchamber", "browser-profile-google-chrome"),
+    profileDir: null,
     headless: true,
     samplingInterval: 200,
     injectScript: null,
@@ -342,7 +342,8 @@ const main = async () => {
   const chrome = resolveChrome(options.chrome)
   const timestamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")
   const output = resolve(options.output ?? join("artifacts", `idle-profile-${timestamp}`))
-  const profileDir = resolve(options.profileDir)
+  const profile = resolveProfileDir(options.profileDir, "idle")
+  const profileDir = profile.dir
   await mkdir(output, { recursive: true })
   await mkdir(profileDir, { recursive: true })
 
@@ -487,6 +488,7 @@ const main = async () => {
   } finally {
     client?.close()
     if (!chromeProcess.killed) chromeProcess.kill("SIGTERM")
+    profile.removeAfter(chromeProcess)
   }
 }
 

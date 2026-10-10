@@ -23,12 +23,11 @@ import { spawn } from "node:child_process"
 import { createWriteStream } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { finished } from "node:stream/promises"
-import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
 
-import { CdpClient, createPageTarget, evaluateValue, findPageTarget, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
+import { CdpClient, createPageTarget, evaluateValue, findPageTarget, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "./perf/cdp.mjs"
 import { buildIdleProbeSource, IDLE_PROBE_GLOBAL } from "./perf/idle-probe.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
 import { growthPerSecond, longestTaskInWindow, metricMap, round, summarizeFrameBudget, summarizeLongTasks, summarizeThreads, summarizeTraceEvents } from "./perf/metrics.mjs"
@@ -72,7 +71,8 @@ Options:
   --output <directory>     Artifact directory
   --label <text>           Human label stored in the summary
   --chrome <path>          Chrome/Chromium executable
-  --profile-dir <path>     Reusable isolated Chrome profile
+  --profile-dir <path>     Chrome profile to reuse (default: a fresh temporary
+                           profile per run, removed afterwards)
   --headed                 Show the browser (default: headless)
   --attach <port>          Measure a browser that is already running and
                            exposes CDP on this port, such as the desktop shell
@@ -114,6 +114,9 @@ Options:
                            describes a modified app and is labelled as such.
   --inject-script <file>   Run a script in the page before it loads. Same
                            purpose and the same labelling as --inject-css.
+                           When the script defines
+                           globalThis.__perfInjected.snapshot(), its result
+                           is saved to injected-probe.json after the tail.
   --baseline <directory>   Compare against a previous run directory
   --budget-long-tasks <n>  Fail when long tasks exceed this count
   --budget-longest <ms>    Fail when the longest task exceeds this
@@ -141,7 +144,7 @@ const parseArgs = (argv) => {
     output: null,
     label: null,
     chrome: null,
-    profileDir: join(homedir(), ".openchamber", "browser-profile-google-chrome"),
+    profileDir: null,
     headless: true,
     attach: null,
     samplingInterval: 200,
@@ -250,16 +253,29 @@ const runSessionCli = (args, { timeoutMs = 900_000 } = {}) => new Promise((resol
  * profile, so the run verifies rendering rather than assuming it.
  */
 const countRenderedMessages = async (client) => {
+  // Text per mounted message, not the page's text: a virtualised timeline
+  // unmounts the rows that scroll out above while the reply grows below, so in
+  // a long session the page's text shrinks while a whole reply streams in.
   const raw = await evaluateValue(client, `JSON.stringify({
     messages: document.querySelectorAll("[data-message-id]").length,
     characters: document.body.innerText.length,
+    perMessage: Object.fromEntries([...document.querySelectorAll("[data-message-id]")]
+      .map((element) => [element.getAttribute("data-message-id"), element.innerText.length])),
   })`)
   try {
     return JSON.parse(raw ?? "{}")
   } catch {
-    return { messages: 0, characters: 0 }
+    return { messages: 0, characters: 0, perMessage: {} }
   }
 }
+
+/**
+ * Message text that appeared during the capture: what new messages hold plus
+ * what messages present before gained. Rows that unmounted are skipped
+ * rather than counted as lost text.
+ */
+const messageTextGrowth = (before, after) => Object.entries(after.perMessage ?? {})
+  .reduce((total, [id, length]) => total + Math.max(0, length - (before.perMessage?.[id] ?? 0)), 0)
 
 /**
  * Reads which directory the app has active and which one owns the session.
@@ -297,7 +313,10 @@ const readAssistantResponse = async (cliBase, sessionId) => {
   return {
     responded: assistant.length > 0,
     messages: assistant.length,
+    // Summed over the page of messages the CLI returns, which in a reused
+    // session includes earlier replies; `replyCharacters` is this reply's own.
     textCharacters: assistant.reduce((total, message) => total + (message.text?.length ?? 0), 0),
+    replyCharacters: assistant.at(-1)?.text?.length ?? 0,
   }
 }
 
@@ -413,7 +432,7 @@ const REPORTED_METRICS = [
   { key: "mainThreadBusyPercent", label: "Main-thread busy", unit: "%", lowerIsBetter: true },
   { key: "recalcStylePerSecond", label: "Style recalcs/sec", unit: "", lowerIsBetter: true },
   { key: "layoutsPerSecond", label: "Layouts/sec", unit: "", lowerIsBetter: true },
-  { key: "framesPerSecond", fromTrace: true, label: "Animation frames/sec", unit: "", lowerIsBetter: false },
+  { key: "framesPerSecond", fromTrace: true, label: "rAF callbacks/sec", unit: "", lowerIsBetter: false },
   { key: "streamSeconds", label: "Stream duration", unit: "s", lowerIsBetter: true },
   { key: "renderedCharacters", label: "Rendered characters", unit: "", lowerIsBetter: false },
   { key: "busyMsPerKilochar", label: "Busy per 1k chars", unit: "ms", lowerIsBetter: true },
@@ -560,9 +579,10 @@ const main = async () => {
   const chrome = attached ? null : resolveChrome(options.chrome)
   const timestamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")
   const output = resolve(options.output ?? join("artifacts", `session-profile-${timestamp}`))
-  const profileDir = resolve(options.profileDir)
+  const profile = attached ? null : resolveProfileDir(options.profileDir, "session")
+  const profileDir = profile?.dir ?? null
   await mkdir(output, { recursive: true })
-  await mkdir(profileDir, { recursive: true })
+  if (profileDir) await mkdir(profileDir, { recursive: true })
 
   const baseline = options.baseline
     ? JSON.parse(await readFile(join(resolve(options.baseline), "session-summary.json"), "utf8"))
@@ -829,15 +849,20 @@ const main = async () => {
     const streamPerformance = await evaluateValue(client, `window.__openchamberStreamPerformance?.getSnapshot() ?? null`)
     const syncCounters = await evaluateValue(client, `window.__openchamberSyncPerformance?.getSnapshot() ?? null`)
     const renderProbeRaw = options.renderProbe ? await readRenderProbe((expression) => evaluateValue(client, expression)) : null
+    // An injected script may expose `globalThis.__perfInjected.snapshot()` to
+    // hand back what it recorded, such as per-frame scroll positions.
+    const injectedProbeRaw = options.injectScript
+      ? await evaluateValue(client, `JSON.stringify(globalThis.__perfInjected?.snapshot?.() ?? null)`)
+      : null
     const dispatchResult = await dispatch.catch(() => null)
 
     // Both signals must agree: new message elements in the DOM and the
     // application's own message-list render counters firing.
     const messageListRendered = (streamPerformance?.entries ?? [])
       .some((entry) => entry.metric.startsWith("ui.message_list") && entry.count > 0)
-    const renderedCharacterGrowth = renderedAfter.characters - renderedBefore.characters
+    const renderedCharacterGrowth = messageTextGrowth(renderedBefore, renderedAfter)
     // A virtualised timeline keeps the mounted message count constant, so in a
-    // long session new text is the DOM signal and a new element is not. An
+    // long session new message text is the DOM signal and a new element is not. An
     // uninstrumented run has no render counters and relies on the DOM signal
     // together with the assistant-response check.
     const domGrew = renderedAfter.messages > renderedBefore.messages || renderedCharacterGrowth > 0
@@ -900,7 +925,9 @@ const main = async () => {
         mainThreadBusyPercent: round((delta("TaskDuration") / elapsedSeconds) * 100),
         recalcStylePerSecond: perSecond("RecalcStyleCount"),
         layoutsPerSecond: perSecond("LayoutCount"),
-        framesPerSecond: round(Number(probe?.counters?.rafScheduled ?? 0) / elapsedSeconds),
+        // requestAnimationFrame calls the page made, not frames drawn; frames
+        // are `framesSubmittedPerSecond` from the saved trace.
+        framesPerSecond: probe ? round(Number(probe.counters?.rafScheduled ?? 0) / elapsedSeconds) : null,
         // Response length varies between runs even for an identical prompt, so
         // per-second and total figures are not comparable across captures.
         // Normalising by rendered output is what makes two runs contrastable.
@@ -940,6 +967,7 @@ const main = async () => {
     if (profile) await writeFile(join(output, "cpu-profile.cpuprofile"), JSON.stringify(profile))
     if (heapProfile) await writeFile(join(output, "heap.heapprofile"), JSON.stringify(heapProfile))
     if (renderProbeRaw) await writeFile(join(output, "render-probe.json"), renderProbeRaw)
+    if (injectedProbeRaw && injectedProbeRaw !== "null") await writeFile(join(output, "injected-probe.json"), injectedProbeRaw)
     if (options.saveTrace && instrumented) {
       // Streamed event by event: one JSON.stringify over a long capture exceeds
       // the maximum string length.
@@ -1007,6 +1035,7 @@ const main = async () => {
     client?.close()
     browserClient?.close()
     if (chromeProcess && !chromeProcess.killed) chromeProcess.kill("SIGTERM")
+    profile?.removeAfter(chromeProcess)
   }
 }
 

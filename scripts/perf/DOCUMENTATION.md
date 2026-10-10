@@ -17,6 +17,7 @@ or extending these scripts. The methodology rules they enforce come from
 | `bun run profile:browser` | A manually driven capture, for interactions that cannot be scripted. |
 | `bun run profile:heap` | How much JS heap and DOM the page keeps after hovering and opening N sessions. |
 | `bun run profile:composer` | What each new composer line costs in style recalculation. |
+| `bun run profile:toggle` | What opening and closing the left session sidebar and the right context panel costs, per toggle. |
 | `bun run profile:compare` | Whether a change made the scenarios faster or slower: builds the before and the after, measures both the same way, prints one table. |
 | `bun run profile:serve` | An isolated server with the fixture provider, to run the commands above by hand. |
 | `bun run profile:analyze` | Where one run's time went: functions, source files, components, long tasks, renders. |
@@ -223,6 +224,14 @@ so a smaller difference is noise.
 or an animation costs by switching it off without a rebuild; `--inject-script`
 does the same with a script (Ablations below). The report marks such a run as
 a modified app. Keep it for attribution; a fix is measured on a real build.
+An injected script that defines `globalThis.__perfInjected.snapshot()` gets its
+result saved to `injected-probe.json` after the tail: the way to sample, say,
+the distance from the scroll end during the stream. Read geometry inside a
+`ResizeObserver` callback, which runs after layout, so the probe forces no
+layout and requests no frame of its own.
+
+`rAF callbacks/sec` counts the page's `requestAnimationFrame` calls, not
+frames drawn; frames are `frames submitted/s` from a `--save-trace` run.
 
 ### The quiet floor and attribution options
 
@@ -387,9 +396,9 @@ Targeting: `--title <text>` adds the sidebar row containing that text
 `--cold-reload --repeat <n>` reloads the page before every cycle, parked on a
 session outside the plan (`--park`, default the first other row, opened with
 `?session=`), so every cycle gives one cold visit per session; without it,
-cycles after the first are all warm. `--profile-dir` gives a run its own
-Chrome profile; the app keeps sidebar state and the last session in storage
-per origin, so compared builds served on the same port each need a fresh one.
+cycles after the first are all warm. The app keeps sidebar state and the last
+session in storage per origin, so every run gets a fresh temporary Chrome
+profile, removed afterwards; `--profile-dir` reuses one on purpose.
 
 ```bash
 bun run profile:switch -- --url http://127.0.0.1:4599 --output artifacts/switch-before
@@ -537,6 +546,92 @@ to compare; milliseconds follow the machine. The run fails when the page has
 no editable composer, and warns when the editor holds fewer lines than were
 typed, because then Shift+Enter inserted nothing and only typing was measured.
 
+## profile:toggle
+
+Opens a session from the sidebar (`--title`, default `perf: long 120`), then
+toggles both sides the way a user does and records each toggle separately.
+Three phases run in order, each with `--warmup` unrecorded-in-statistics pairs
+(default 1) and `--count` measured pairs (default 5):
+
+| Phase | Toggle types | Starting state |
+|---|---|---|
+| `sidebar` | `sidebar-close`, `sidebar-open` | context panel closed |
+| `panel` | `panel-open`, `panel-close` | sidebar open |
+| `sidebar-with-panel` | `sidebar-close@panel`, `sidebar-open@panel` | context panel open |
+
+`--method click` (default) clicks the real buttons: the titlebar's sidebar
+button (`data-sidebar-toggle`) and the rail button of `--surface` (default
+`file`; `data-context-surface` carries the registry id), so the UI language
+does not matter. The sidebar is `[data-left-sidebar]`. The right side is the
+slot `[data-right-slot]`, which holds the context panel and the work-status
+card: it can be as wide as the card while the panel is closed, so the panel's
+open state is read from `data-context-panel-open`, never from the width.
+Builds older than these hooks are found by icon and class, and the panel is
+open when wider than 1 px, so a baseline from before them still measures. The
+`file` surface opens tree-only (240 px) in a project with no file open;
+`--surface context` measures a full-width panel. `--method key` presses `mod+b` and
+`mod+alt+<rail digit>`, as the app's shortcuts read them. The pointer rests on
+the button for `--hover` ms before a phase, so its tooltip opens there; the
+first click closes it, which is one reason the warm-up exists. The other is
+the first panel open, which loads the surface's code: a warm-up toggle is
+recorded and printed, never pooled.
+
+```bash
+bun run profile:toggle -- --url http://127.0.0.1:4799 --output tmp/toggle/before
+bun run profile:toggle -- --url http://127.0.0.1:4799 --title "perf: short A" --method key
+```
+
+Each toggle has a window: from a mark set just before the input until the
+target's `width` transition ended plus `--tail` ms (default 250), or
+`--window` ms when it never ends. Between toggles the page rests for
+`--settle` ms, unrecorded. Per toggle, and as median / p95 per type:
+
+- `input to next frame`: from the input event's timestamp to the end of the
+  main-thread work of the next frame (an animation frame scheduled from the
+  input, then a message task). `input task` is the trace task that handled the
+  click or the shortcut's keydown. The Event Timing duration is recorded only
+  when the browser reports it, above 16 ms;
+- frame pacing from an animation-frame loop that runs only while a toggle is
+  armed: the refresh interval comes from the `--pre` ms before the input,
+  `worst frame` is the largest gap in the window, and a gap of k intervals
+  counts k−1 `dropped frames`. Long animation frames (over 50 ms) are kept
+  with the scripts inside them and their forced style and layout time;
+- from the trace: style recalcs (count, ms, elements restyled) and layouts
+  (count, ms), overall and for the worst frame (frames split at the main
+  thread's `Commit`), and forced style/layout: a recalc or layout nested in
+  script, attributed to the JS stack Chrome recorded on it. The run prints
+  the top forcing stacks across measured toggles;
+- `observed transition`: `transitionstart` to `transitionend` of the target's
+  `width`, against the declared duration; widths and open states before and
+  after, and the work-status card's width before and after;
+- with `--render-probe`, React commits and renders inside the window with the
+  components rendered most.
+
+A toggle is invalid, and the run exits non-zero after writing its summary,
+when the open state did not go from closed to open or back, the width did not
+change, the page never received
+the input, a width transition is declared but never ran, none is declared
+without reduced motion, the window drew fewer than two frames or the refresh
+interval before it was over 50 ms (throttled), the document was hidden, or the
+trace has no renderer main thread for the window. `profile:compare` and
+`compare-runs.mjs` exclude such a run. `--reduced-motion` emulates
+`prefers-reduced-motion: reduce`; then no transition is expected, and a side
+that still animates is a warning.
+
+The recorder takes widths during the animation from a `ResizeObserver` and
+reads geometry only outside the window, so it forces no layout of its own.
+`dropped frames` in a headless run come from a software compositor: quote
+frame pacing from a headed run (the default), and keep the window uncovered.
+Prove the instruments with the positive control (Ablations below):
+`--inject-script scripts/perf/controls/toggle-jank.js` must read dropped frames
+and forced layouts on every toggle.
+
+`--extra-categories cc,gpu,viz` adds trace categories. A long main-thread
+`Commit` in the first frame after a toggle with nothing traced inside it is
+the main thread waiting on the compositor and GPU pipeline, not script, style
+or layout; on the 2026-10 measurements it held 36 to 77 ms before and about
+50 ms after the toggle work was removed, cause not identified.
+
 ## Comparing Two Builds
 
 `profile:compare` automates the before/after rule from Methodology Rules:
@@ -585,6 +680,7 @@ What it does, in order:
 | `startup-cold`, `startup-warm` | `profile:startup --url`, `--runs <runs>` | one invocation per round |
 | `heap` | `profile:heap --count 20` | sees the sessions earlier scenarios added; keep the scenario list identical between compares |
 | `composer` | `profile:composer` on the long session | |
+| `toggle`, `toggle-short` | `profile:toggle --headless` on the long session and on short A, `--count <runs>` | one invocation per round |
 
 `--render-probe` and `--save-trace` pass through to the scenarios that take
 them. `--rounds 2` or more alternates the sides, so machine drift lands on
@@ -605,6 +701,9 @@ median, and a verdict.
 - `switch` and `startup` pool every switch or launch. Switch pools sessions of
   different sizes, so its range is wide and its noise verdict conservative;
   `bySession` in each `switch-summary.json` has one session's numbers.
+- `toggle` pools every measured toggle, one row set per toggle type
+  (`panel-open worst frame ms`); `byType` in each `toggle-summary.json` has
+  every metric, including the ones the table leaves out.
 - With `--save-trace`, session scenarios add pipeline rows (frames submitted,
   elements restyled, layerize, GPU compositor, raster); with `--render-probe`,
   render rows and a renders/s table per component.
@@ -642,9 +741,10 @@ producing store counts that silently read zero.
 
 ### Render probe
 
-`--render-probe` on `profile:session`, `profile:switch` and `profile:idle`
-installs `render-probe.mjs` before application code: a minimal React DevTools
-hook that walks every commit, the store probe, and a MutationObserver. The run
+`--render-probe` on `profile:session`, `profile:switch`, `profile:idle` and
+`profile:toggle` installs `render-probe.mjs` before application code: a
+minimal React DevTools hook that walks every commit, the store probe, and a
+MutationObserver. The run
 writes `render-probe.json`, adds `renderProbe` to its summary, and prints:
 
 - per component: renders/s; `no DOM`, the renders whose whole subtree wrote
@@ -715,7 +815,10 @@ the summary and the table. The fix that follows is measured with
 
 `scripts/perf/controls/` holds positive controls: injections that create the
 effect a metric must catch. `shift-60px.js` moves content after each switch
-reveal, so `profile:switch` has to read a 60 px shift.
+reveal, so `profile:switch` has to read a 60 px shift. `toggle-jank.js` busy-waits
+25 ms and forces a layout on every frame of a width transition, so
+`profile:toggle` has to read dropped frames, a worst frame of 25 ms or more,
+and forced layouts under `forceLayoutOnTransitionFrame` on every toggle.
 
 ## Reading The Results
 
@@ -727,6 +830,8 @@ compared later without re-running:
 - `profile:startup` → `startup-summary.json`
 - `profile:switch` → `switch-summary.json`, `trace.json`, `cpu-profile.cpuprofile`
 - `profile:heap` → `heap-summary.json`; `profile:composer` → `composer-summary.json`
+- `profile:toggle` → `toggle-summary.json`, `trace.json`, with `--cpu-profile`
+  `cpu-profile.cpuprofile`
 - `--render-probe` → `render-probe.json`; `--heap-sampling` → `heap.heapprofile`;
   `--save-trace` → `trace.json` (`profile:analyze` and `compare-runs.mjs` cache
   their pipeline figures next to it in `trace-pipeline.json`)
@@ -756,7 +861,9 @@ of these failure modes once produced a confident, wrong "everything is fast":
   is not viewing renders nothing and produces a perfectly quiet profile.
   `profile:session` verifies both rendered growth in the DOM and message-list
   render counters before believing a quiet result. A virtualised timeline
-  keeps its mounted message count constant, so new text counts as growth.
+  keeps its mounted message count constant, so new text counts as growth,
+  measured per message: in a long session the rows above unmount as the reply
+  grows, and the page's total text shrinks while a whole reply streams in.
 - **A response that never streamed.** A provider that rejects the request
   leaves the session idle within seconds with the user message rendered, which
   passes the check above. The run asks the session for an assistant message and
@@ -813,7 +920,7 @@ be a measurement, never a disabled instrument.
 
 | File | Responsibility |
 |---|---|
-| `cdp.mjs` | Chrome launch, target discovery, minimal CDP client. Owns the anti-throttling launch flags. |
+| `cdp.mjs` | Chrome launch, target discovery, minimal CDP client. Owns the anti-throttling launch flags and the per-run temporary Chrome profile (`resolveProfileDir`); `profile:browser` alone keeps a reusable profile, for a manually driven session. |
 | `metrics.mjs` | Metric derivations shared by the profilers: growth rates, percentiles, long-task, frame-budget, windowed longest-task, trace-event and per-thread summaries. |
 | `process-cpu.mjs` | CPU per process from cumulative counters: Chrome through browser-level `SystemInfo`, the server and its OpenCode child through `ps`. Unresolved processes are reported as missing, never as zero. |
 | `fixture-provider.mjs` | Deterministic OpenAI-compatible provider: one fixed document at a rate chosen by model name. |
@@ -831,5 +938,6 @@ be a measurement, never a disabled instrument.
 | `compare-runs.mjs` | The before/after table over two directories of runs. |
 | `analyze-run.mjs` | `profile:analyze`: attribution report for one run directory. |
 | `trace-analysis.mjs` | Saved-trace analysis: pipeline per second, task classification, large style recalcs. |
+| `toggle-analysis.mjs` | `profile:toggle`'s pure analysis: refresh interval and frame pacing, per-window style/layout and forced layouts from the trace, renders per window, statistics per toggle type. |
 | `source-map.mjs` | Dependency-free source-map reader for the diagnostic build. |
 | `ablations/`, `controls/` | Injected scripts: ablations switch a suspect off, controls create the effect a metric must catch. |

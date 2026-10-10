@@ -39,14 +39,15 @@ Measurement:
   --scenarios <list>       Comma-separated (default: stream,code,agent,switch,idle).
                            Available: ${"<SCENARIOS>"}
   --runs <n>               Runs per scenario and round (default: 5). For switch:
-                           reload cycles; for startup: launches
+                           reload cycles; for startup: launches; for toggle:
+                           measured close/open pairs per phase
   --rounds <n>             Alternate before/after this many times (default: 1).
                            Use 2 or more when the expected change is small:
                            machine drift then lands on both sides
   --build <prod|diag>      Build to serve (default: prod). diag is the
                            unminified build with source maps and store
                            notifications, for attribution only
-  --render-probe           Pass --render-probe to session, switch and idle
+  --render-probe           Pass --render-probe to session, switch, idle and toggle
                            scenarios (use with --build diag for real names)
   --save-trace             Session scenarios keep trace.json; the table then
                            adds frames, restyled elements, layerize and GPU rows
@@ -86,6 +87,8 @@ const SCENARIOS = {
   "startup-warm": { kind: "startup", once: true, args: (_seed, runs) => ["--cache", "warm", "--runs", String(runs), "--warmup", "1"] },
   heap: { kind: "heap", seed: true, once: true, args: () => ["--count", "20"] },
   composer: { kind: "composer", seed: true, args: (seed) => ["--session", seed.long] },
+  toggle: { kind: "toggle", seed: true, once: true, args: (_seed, runs) => ["--title", "perf: long 120", "--count", String(runs), "--headless"] },
+  "toggle-short": { kind: "toggle", seed: true, once: true, args: (_seed, runs) => ["--title", "perf: short A", "--count", String(runs), "--headless"] },
 }
 
 const SCRIPTS = {
@@ -95,6 +98,7 @@ const SCRIPTS = {
   startup: "scripts/profile-startup.mjs",
   heap: "scripts/profile-heap.mjs",
   composer: "scripts/profile-composer.mjs",
+  toggle: "scripts/profile-toggle.mjs",
 }
 
 const parseArgs = (argv) => {
@@ -293,7 +297,7 @@ const scenarioCommand = ({ name, scenario, seed, options, paths, side, url, outp
   const common = scenario.kind === "startup" ? ["--url", `${url}/`, "--home", chrome] : ["--url", url, "--profile-dir", chrome]
   const extra = []
   if (scenario.kind === "session") extra.push("--dir", paths.project)
-  if (options.renderProbe && ["session", "switch", "idle"].includes(scenario.kind) && !scenario.uninstrumented) extra.push("--render-probe")
+  if (options.renderProbe && ["session", "switch", "idle", "toggle"].includes(scenario.kind) && !scenario.uninstrumented) extra.push("--render-probe")
   if (options.saveTrace && scenario.kind === "session" && !scenario.uninstrumented) extra.push("--save-trace")
   return [SCRIPTS[scenario.kind], ...common, ...extra, ...scenario.args(seed, options.runs), "--output", output, "--label", `${side} ${name}`]
 }

@@ -19,6 +19,7 @@ import process from "node:process"
 
 import { percentile, round } from "./metrics.mjs"
 import { invalidReasons, modifications, readSummary } from "./run-summary.mjs"
+import { measuredToggles, TOGGLE_METRICS } from "./toggle-analysis.mjs"
 import { cachedPipelineMetrics } from "./trace-analysis.mjs"
 
 const HELP = `Usage: node scripts/perf/compare-runs.mjs <before dir> <after dir> [options]
@@ -61,20 +62,24 @@ const processCpu = (data, label) => {
 }
 
 const metric = (key) => (data) => data.metrics?.[key]
+// Read from the timeline trace, which an uninstrumented run (`--process-cpu-only`)
+// never records: its summary holds placeholder zeros, so they read as missing.
+const traceMetric = (key) => (data) => (data.instrumented === false ? null : data.metrics?.[key])
 
 /** Per-run values: one number per run directory and metric, as [read(summary), label, lowerIsBetter]. */
 const RUN_METRICS = {
   session: [
-    [metric("longestTaskMs"), "longest task ms", LOWER],
-    [metric("longTaskCount"), "tasks >50 ms", LOWER],
-    [metric("tasksOver16msCount"), "main tasks >16.7 ms", LOWER],
-    [metric("tasksOver8msCount"), "main tasks >8.33 ms", LOWER],
-    [metric("finalizeLongestTaskMs"), "longest task ≤1 s after idle ms", LOWER],
-    [metric("taskP99Ms"), "task p99 ms", LOWER],
+    [traceMetric("longestTaskMs"), "longest task ms", LOWER],
+    [traceMetric("longTaskCount"), "tasks >50 ms", LOWER],
+    [traceMetric("tasksOver16msCount"), "main tasks >16.7 ms", LOWER],
+    [traceMetric("tasksOver8msCount"), "main tasks >8.33 ms", LOWER],
+    [traceMetric("finalizeLongestTaskMs"), "longest task ≤1 s after idle ms", LOWER],
+    [traceMetric("taskP99Ms"), "task p99 ms", LOWER],
     [metric("mainThreadBusyPercent"), "main-thread busy %", LOWER],
     [metric("busyMsPerKilochar"), "busy ms per 1k chars", LOWER],
     [metric("recalcStylePerSecond"), "style recalcs/s", LOWER],
     [metric("layoutsPerSecond"), "layouts/s", LOWER],
+    [metric("framesPerSecond"), "rAF callbacks/s", LOWER],
     [metric("heapMaxMb"), "heap max MB", LOWER],
     [(data) => processCpu(data, "chrome renderer"), "renderer process CPU %", LOWER],
     [(data) => processCpu(data, "chrome GPU"), "GPU process CPU %", LOWER],
@@ -103,11 +108,15 @@ const RUN_METRICS = {
     [(data) => data.medianPerLine?.elements, "elements restyled per line", LOWER],
     [(data) => data.medianPerLine?.ms, "recalc ms per line", LOWER],
   ],
+  toggle: [
+    [(data) => data.session?.mountedMessages, "mounted messages (workload)", WORKLOAD],
+  ],
 }
 
 const PIPELINE_METRICS = [
   ["framesSubmittedPerSecond", "frames submitted/s", LOWER],
   ["mainCommitsPerSecond", "main-thread frame commits/s", LOWER],
+  ["paintsPerSecond", "paints/s", LOWER],
   ["recalcElementsPerSecond", "elements restyled/s", LOWER],
   ["layerizeMsPerSecond", "layerize ms/s", LOWER],
   ["gpuCompositorMsPerSecond", "GPU compositor ms/s", LOWER],
@@ -189,6 +198,14 @@ const seriesFor = (runs) => {
     for (const visit of ["cold", "warm"]) {
       const entries = valid.flatMap((run) => run.data.switches ?? []).filter((entry) => entry.visit === visit && entry.ack !== null && entry.content !== null)
       for (const [read, label] of SWITCH_METRICS) push(`${visit} ${label}`, LOWER, entries.map(read))
+    }
+  }
+  if (kind === "toggle") {
+    // Pooled per toggle type: every measured toggle of every run is one sample.
+    const toggles = valid.flatMap((run) => measuredToggles(run.data.toggles ?? []))
+    for (const type of new Set(toggles.map((toggle) => toggle.type))) {
+      const ofType = toggles.filter((toggle) => toggle.type === type)
+      for (const [, label, read, shown] of TOGGLE_METRICS) if (shown) push(`${type} ${label}`, LOWER, ofType.map(read))
     }
   }
   if (kind === "startup") {

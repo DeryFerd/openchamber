@@ -31,11 +31,10 @@
  */
 
 import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import process from "node:process"
 
-import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
+import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "./perf/cdp.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
 import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
 import { percentile, round } from "./perf/metrics.mjs"
@@ -99,9 +98,10 @@ Options:
                            With --render-probe, record the call stacks that
                            dispatch to this component's hook
   --chrome <path>          Chrome/Chromium executable
-  --profile-dir <path>     Chrome profile (default: ~/.cache/openchamber-perf-switch-profile).
-                           Its storage persists the sidebar and last session per
-                           origin, so give each compared build its own fresh one.
+  --profile-dir <path>     Chrome profile to reuse (default: a fresh temporary
+                           profile per run, removed afterwards). Its storage
+                           persists the sidebar and last session per origin, so
+                           give each compared build its own fresh one.
   --headless               Run without a visible browser
   --help                   Show this help
 
@@ -132,7 +132,7 @@ const parseArgs = (argv) => {
     renderProbe: false,
     renderProbeHook: null,
     chrome: null,
-    profileDir: join(homedir(), ".cache", "openchamber-perf-switch-profile"),
+    profileDir: null,
     headless: false,
   }
   for (let index = 0; index < argv.length; index += 1) {
@@ -437,14 +437,14 @@ const main = async () => {
   const options = parseArgs(process.argv.slice(2))
   const output = resolve(options.output ?? join("artifacts", `switch-profile-${new Date().toISOString().replace(/[:.]/g, "-")}`))
   await mkdir(output, { recursive: true })
-  const profileDir = options.profileDir
+  const profile = resolveProfileDir(options.profileDir, "switch")
   const chrome = resolveChrome(options.chrome)
   const baseline = options.baseline
     ? JSON.parse(await readFile(join(resolve(options.baseline), "switch-summary.json"), "utf8"))
     : null
 
   const port = await reservePort()
-  const chromeProcess = launchChrome({ chrome, profileDir, port, headless: options.headless })
+  const chromeProcess = launchChrome({ chrome, profileDir: profile.dir, port, headless: options.headless })
   let client
   try {
     const target = await createPageTarget(port)
@@ -677,6 +677,7 @@ const main = async () => {
   } finally {
     client?.close()
     chromeProcess.kill()
+    profile.removeAfter(chromeProcess)
   }
 }
 

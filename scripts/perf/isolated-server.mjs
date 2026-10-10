@@ -250,6 +250,9 @@ const parseArgs = (argv) => {
 const main = async () => {
   const options = parseArgs(process.argv.slice(2))
   const state = join(options.root, "state")
+  // The fixture log is opened before startServer creates anything under the
+  // root, so a first run on a new --root needs the directory made here.
+  mkdirSync(options.root, { recursive: true })
   if (options.fresh) restoreState(state, join(options.root, "seed"))
   const fixture = await startFixture({ port: options.fixturePort, logFile: join(options.root, "fixture.log") })
   let server

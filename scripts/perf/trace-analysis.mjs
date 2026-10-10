@@ -42,7 +42,7 @@ export const traceWindow = (events) => {
 }
 
 /** The renderer main thread with the most events inside the window. */
-const rendererMainThread = (events, window) => {
+export const rendererMainThread = (events, window) => {
   const names = new Map()
   for (const event of events) if (event.ph === "M" && event.name === "thread_name") names.set(threadKey(event), event.args?.name)
   const counts = new Map()

@@ -25,6 +25,7 @@ export const invalidReasons = (data) => {
   if (Array.isArray(data.failures) && data.failures.length > 0 && data.runs === data.failures.length) reasons.push("every launch failed")
   if (data.rows === 0) reasons.push("no sidebar rows")
   if (data.editorFound === false) reasons.push("composer editor not found")
+  if (data.toggleValidity?.ok === false) reasons.push(`toggle validity failed: ${data.toggleValidity.failures.join("; ")}`)
   return reasons
 }
 
