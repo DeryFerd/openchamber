@@ -2298,6 +2298,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         setLoadedFilePath(pendingMove.to);
         return;
       }
+    } else if (pendingMove && loadedFilePath !== pendingMove.from) {
+      // Another file finished loading while the move landed (the user
+      // switched tabs mid-move): nothing is left to adopt, and a stale hold
+      // would block every save of the file now open.
+      pendingPathMoveRef.current = null;
     }
 
     if (!visible) return;
