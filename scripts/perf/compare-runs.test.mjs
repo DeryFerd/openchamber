@@ -67,3 +67,19 @@ test("toggle runs pool measured toggles per type and drop a run that failed vali
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("sides that differ in building an accessibility tree are flagged", () => {
+  const root = mkdtempSync(join(tmpdir(), "compare-runs-"))
+  const accessibility = (active, forced = false) => ({ accessibility: { recorded: true, forced, active, serializations: active ? 10 : 0, nativeClientCalls: 0 } })
+  try {
+    writeRuns(join(root, "before"), "idle", [idle(1.0, accessibility(true)), idle(1.0, accessibility(true))])
+    writeRuns(join(root, "off"), "idle", [idle(1.0, accessibility(false)), idle(1.0, accessibility(false))])
+    writeRuns(join(root, "on"), "idle", [idle(1.0, accessibility(true)), idle(1.0, accessibility(true))])
+    assert.match(compareResultDirs(join(root, "before"), join(root, "off")), /ACCESSIBILITY DIFFERS, timings do not compare: accessibility tree before: on \(client\) in 2; after: off in 2/)
+    const same = compareResultDirs(join(root, "before"), join(root, "on"))
+    assert.doesNotMatch(same, /DIFFERS/)
+    assert.match(same, /accessibility tree before: on \(client\) in 2; after: on \(client\) in 2/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

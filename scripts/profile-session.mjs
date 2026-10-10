@@ -27,6 +27,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
 
+import { ACCESSIBILITY_CATEGORY, accessibilityInWindow, accessibilityState, describeAccessibility, FORCE_ACCESSIBILITY_ARGS } from "./perf/accessibility.mjs"
 import { CdpClient, createPageTarget, evaluateValue, findPageTarget, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "./perf/cdp.mjs"
 import { buildIdleProbeSource, IDLE_PROBE_GLOBAL } from "./perf/idle-probe.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
@@ -34,6 +35,7 @@ import { growthPerSecond, longestTaskInWindow, metricMap, round, summarizeFrameB
 import { createProcessCpuSampler, openBrowserClient, resolveServerProcesses } from "./perf/process-cpu.mjs"
 import { buildRenderProbeSource, printRenderProbe, readRenderProbe, RENDER_PROBE_GLOBAL, summarizeRenderProbe } from "./perf/render-probe.mjs"
 import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
+import { rendererMainThread, traceWindow } from "./perf/trace-analysis.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const cliPath = join(repoRoot, "packages/web/bin/cli.js")
@@ -91,7 +93,12 @@ Options:
                            DevTools Performance panel and Perfetto both open.
   --extra-categories <list> Comma-separated trace categories to add, such as
                            disabled-by-default-devtools.timeline.invalidationTracking
-                           (names what invalidated each style recalc)
+                           (names what invalidated each style recalc). The
+                           accessibility category is always recorded
+  --force-accessibility    Launch Chrome with its accessibility tree on, as an
+                           accessibility client turns it on (a screen reader,
+                           or a macOS app that reads other windows), so every
+                           machine and headless runs measure that case
   --render-probe           Count renders per component, renders that changed
                            nothing in the DOM, store notifications and DOM
                            mutations per region (scripts/perf/render-probe.mjs).
@@ -155,6 +162,7 @@ const parseArgs = (argv) => {
     injectScript: null,
     quiet: 0,
     extraCategories: [],
+    forceAccessibility: false,
     renderProbe: false,
     renderProbeHook: null,
     heapSampling: false,
@@ -196,6 +204,7 @@ const parseArgs = (argv) => {
     else if (value === "--inject-script") options.injectScript = argv[++index]
     else if (value === "--quiet") options.quiet = Number(argv[++index])
     else if (value === "--extra-categories") options.extraCategories = String(argv[++index]).split(",").map((category) => category.trim()).filter(Boolean)
+    else if (value === "--force-accessibility") options.forceAccessibility = true
     else if (value === "--render-probe") options.renderProbe = true
     else if (value === "--render-probe-hook") options.renderProbeHook = argv[++index]
     else if (value === "--heap-sampling") options.heapSampling = true
@@ -428,6 +437,8 @@ const REPORTED_METRICS = [
   { key: "longestTaskMs", fromTrace: true, label: "Longest task", unit: "ms", lowerIsBetter: true },
   { key: "taskP95Ms", fromTrace: true, label: "Task p95", unit: "ms", lowerIsBetter: true },
   { key: "taskP99Ms", fromTrace: true, label: "Task p99", unit: "ms", lowerIsBetter: true },
+  { key: "accessibilityMs", fromTrace: true, label: "Accessibility", unit: "ms", lowerIsBetter: true },
+  { key: "accessibilityLongestPassMs", fromTrace: true, label: "Longest a11y pass", unit: "ms", lowerIsBetter: true },
   { key: "blockedPercent", fromTrace: true, label: "Time in long tasks", unit: "%", lowerIsBetter: true },
   { key: "mainThreadBusyPercent", label: "Main-thread busy", unit: "%", lowerIsBetter: true },
   { key: "recalcStylePerSecond", label: "Style recalcs/sec", unit: "", lowerIsBetter: true },
@@ -458,6 +469,8 @@ const printReport = (summary, baseline) => {
   console.log("")
   if (summary.instrumented === false) {
     console.log("Uninstrumented run: trace, sampler and probe were off, so their metrics are omitted rather than shown as zero.\n")
+  } else if (summary.accessibility) {
+    console.log(`${describeAccessibility(summary.accessibility)}\n`)
   }
   for (const metric of REPORTED_METRICS) {
     if (metric.fromTrace && summary.instrumented === false) continue
@@ -603,7 +616,8 @@ const main = async () => {
   }
 
   const port = attached ? options.attach : await reservePort()
-  const chromeProcess = attached ? null : launchChrome({ chrome, profileDir, port, headless: options.headless })
+  if (attached && options.forceAccessibility) throw new Error("--force-accessibility launches Chrome; it does not apply with --attach")
+  const chromeProcess = attached ? null : launchChrome({ chrome, profileDir, port, headless: options.headless, extraArgs: options.forceAccessibility ? FORCE_ACCESSIBILITY_ARGS : [] })
   let client
   let browserClient
   try {
@@ -708,21 +722,20 @@ const main = async () => {
       await client.send("HeapProfiler.enable")
       await client.send("HeapProfiler.startSampling", { samplingInterval: 32768, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true })
     }
-    if (instrumented) await client.send("Tracing.start", {
-      transferMode: "ReportEvents",
-      // `RunTask` is only emitted under the disabled-by-default timeline
-      // category. Without it the capture silently reports zero long tasks.
-      categories: [
-        "devtools.timeline",
-        "disabled-by-default-devtools.timeline",
-        "disabled-by-default-devtools.timeline.frame",
-        "blink.user_timing",
-        // `toplevel` wraps every task on every thread of every process; the
-        // rest name what the compositor and the GPU process did inside them.
-        ...(options.threadBreakdown ? ["toplevel", "cc", "viz", "gpu", "v8.gc", "disabled-by-default-v8.gc"] : []),
-        ...options.extraCategories,
-      ].join(","),
-    })
+    // `RunTask` is only emitted under the disabled-by-default timeline
+    // category. Without it the capture silently reports zero long tasks.
+    const categories = [...new Set([
+      "devtools.timeline",
+      "disabled-by-default-devtools.timeline",
+      "disabled-by-default-devtools.timeline.frame",
+      "blink.user_timing",
+      ACCESSIBILITY_CATEGORY,
+      // `toplevel` wraps every task on every thread of every process; the
+      // rest name what the compositor and the GPU process did inside them.
+      ...(options.threadBreakdown ? ["toplevel", "cc", "viz", "gpu", "v8.gc", "disabled-by-default-v8.gc"] : []),
+      ...options.extraCategories,
+    ])]
+    if (instrumented) await client.send("Tracing.start", { transferMode: "ReportEvents", categories: categories.join(",") })
 
     const before = metricMap((await client.send("Performance.getMetrics")).metrics)
     const renderedBefore = await countRenderedMessages(client)
@@ -880,6 +893,10 @@ const main = async () => {
       ? longestTaskInWindow(traceEvents, sessionIdle.micros, sessionIdle.micros + 1_000_000)
       : null
     const traceBreakdown = summarizeTraceEvents(traceEvents)
+    const recordedWindow = traceWindow(traceEvents)
+    const accessibility = instrumented
+      ? accessibilityInWindow(traceEvents, { main: rendererMainThread(traceEvents, recordedWindow).main, ...recordedWindow, recorded: true })
+      : null
     const threadBreakdown = options.threadBreakdown ? summarizeThreads(traceEvents) : null
     const delta = (name) => Number(after[name] ?? 0) - Number(before[name] ?? 0)
     const perSecond = (name) => round(delta(name) / elapsedSeconds)
@@ -914,6 +931,7 @@ const main = async () => {
       traceComplete,
       disposableSession: !options.keepSession && !options.session,
       sessionIdle,
+      accessibility: instrumented ? accessibilityState(traceEvents, { categories, forced: options.forceAccessibility }) : null,
       metrics: {
         ...tasks,
         ...frameBudget,
@@ -921,6 +939,10 @@ const main = async () => {
         // code highlights, the list re-measures) right after the session goes idle.
         finalizeLongestTaskMs: finalize?.longestMs ?? null,
         finalizeTasksOver16msCount: finalize?.tasksOver16msCount ?? null,
+        // Serializing the accessibility tree, paid only while an accessibility
+        // client is on (`accessibility` says whether it was).
+        accessibilityMs: accessibility?.ms ?? null,
+        accessibilityLongestPassMs: accessibility?.longestPassMs ?? null,
         blockedPercent: round((tasks.longTaskTotalMs / (elapsedSeconds * 1000)) * 100),
         mainThreadBusyPercent: round((delta("TaskDuration") / elapsedSeconds) * 100),
         recalcStylePerSecond: perSecond("RecalcStyleCount"),

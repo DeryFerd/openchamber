@@ -109,6 +109,49 @@ maintainer's own app and dev shell, on the same machine.
   heavy run, check for orphaned headless Chromes and `opencode serve`
   processes from earlier probes and report them.
 
+## When An Accessibility Client Is On
+
+Chrome builds no accessibility tree until a client asks for one: a screen
+reader, or on macOS any app that reads other windows (window managers,
+launchers, clipboard, dictation and automation tools, anything listed under
+System Settings > Privacy & Security > Accessibility). From then on every frame
+that changes what the tree exposes ends in a serialization pass inside the main
+thread's `Commit` (`SerializeLifecycleStage`), and the browser process receives
+the result. The same build therefore measures differently on two machines, and
+headed differently from headless: headless Chrome has no client.
+
+What it costs here, measured on an M-series Mac with such an app running:
+
+- a node beside the transcript changing its own hidden state (`aria-hidden` or
+  `inert` on the sidebar's column) re-serialized the transcript: 40 to 55 ms
+  in the first frame of every sidebar toggle, two dropped frames. Hiding a
+  node inside a small subtree costs a few ms; the sidebar now flips only
+  `inert` on its content (`components/layout/Sidebar.tsx`);
+- text in the transcript re-wrapping (a context panel wide enough to narrow
+  the message column) re-serializes the transcript once, 40 to 50 ms, usually
+  just after the animation and sometimes inside it;
+- a session switch serializes the new transcript before it shows (45 to 65
+  ms), then again when LegendList's DOM-order pass moves rows (about 40 ms
+  after the reveal) and when code blocks get their path-token spans (about
+  30 ms on a cold switch);
+- streaming costs about 5% of main-thread time in small passes, with no long
+  task.
+
+Every `profile:toggle`, `profile:switch` and `profile:session` run records the
+`accessibility` category and says which case it measured: `accessibility: on`
+(with the native calls a macOS client made, or `forced`) or `off`. To check a
+machine by hand, open `chrome://accessibility` in the browser being measured:
+"Native accessibility API support" ticked means a client is on. Toggles report
+`accessibility ms` per toggle, switches per switch, sessions for the stream.
+
+`--force-accessibility` on those commands, and on `profile:compare`, launches
+Chrome with `--force-renderer-accessibility`, so headless runs and every
+machine measure the client case; measured headless, it reproduced the headed
+figures above. Without it, compare runs only against each other on the same
+machine in the same state: `compare-runs.mjs` flags a scenario whose sides
+differ (`ACCESSIBILITY DIFFERS`). Find the cause with ablations, as for any
+other cost: the trace names the pass, not what dirtied the tree.
+
 ## profile:idle
 
 Loads the app, lets it settle, then records a window during which no input is
@@ -630,15 +673,13 @@ Prove the instruments with the positive control (Ablations below):
 and forced layouts on every toggle.
 
 `--extra-categories cc,gpu,viz` adds trace categories. A long main-thread
-`Commit` with nothing traced inside it is not necessarily the compositor:
-add `accessibility` first. Chrome serializes its accessibility tree inside
-`Commit` (`SerializeLifecycleStage`) whenever an accessibility client is on,
-which on macOS includes apps that read other windows, so a headed run on such
-a machine pays it and a headless one never does. The ~40 to 50 ms `Commit`
-after every panel animation is this pass, and hiding a CodeMirror editor in
-place (`aria-hidden`, `inert`, `display: none`, `content-visibility`) made it
-200 to 300 ms per close, while removing the editor's DOM cost a few ms
-(`CodeMirrorEditor` `detached`). Quote such toggles from headed runs.
+`Commit` with nothing traced inside it is usually the accessibility pass
+(When An Accessibility Client Is On): each toggle reports `accessibility ms`,
+the summary says whether a tree was built, and `--force-accessibility` builds
+one in any Chrome. Hiding a CodeMirror editor in place (`aria-hidden`,
+`inert`, `display: none`, `content-visibility`) made that pass 200 to 300 ms
+per close, while removing the editor's DOM cost a few ms (`CodeMirrorEditor`
+`detached`).
 
 ## Comparing Two Builds
 
@@ -688,10 +729,12 @@ What it does, in order:
 | `startup-cold`, `startup-warm` | `profile:startup --url`, `--runs <runs>` | one invocation per round |
 | `heap` | `profile:heap --count 20` | sees the sessions earlier scenarios added; keep the scenario list identical between compares |
 | `composer` | `profile:composer` on the long session | |
-| `toggle`, `toggle-short` | `profile:toggle --headless` on the long session and on short A, `--count <runs>` | one invocation per round |
+| `toggle`, `toggle-short` | `profile:toggle` on the long session and on short A, `--count <runs>` | one invocation per round; headed, opens a visible window |
 
 `--render-probe` and `--save-trace` pass through to the scenarios that take
-them. `--rounds 2` or more alternates the sides, so machine drift lands on
+them. `--force-accessibility` launches the session, switch and toggle
+scenarios with Chrome's accessibility tree on, so the table does not depend on
+whether the machine runs an accessibility client. `--rounds 2` or more alternates the sides, so machine drift lands on
 both; use it when the expected change is a few percent.
 
 ### Reading the table
@@ -947,6 +990,7 @@ be a measurement, never a disabled instrument.
 | `run-summary.mjs` | Reading run directories, and the one definition of a run that measured nothing and of a modified run. |
 | `compare-runs.mjs` | The before/after table over two directories of runs. |
 | `analyze-run.mjs` | `profile:analyze`: attribution report for one run directory. |
+| `accessibility.mjs` | Accessibility-tree work in a trace window, whether a tree was built and who asked for it, and the flag that forces one. |
 | `trace-analysis.mjs` | Saved-trace analysis: pipeline per second, task classification, large style recalcs. |
 | `toggle-analysis.mjs` | `profile:toggle`'s pure analysis: refresh interval and frame pacing, per-window style/layout and forced layouts from the trace, renders per window, statistics per toggle type. |
 | `source-map.mjs` | Dependency-free source-map reader for the diagnostic build. |

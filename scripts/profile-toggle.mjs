@@ -12,6 +12,9 @@
  *   animation frames with the scripts inside them;
  * - from the trace: style recalcs and layouts (count, time, elements,
  *   worst frame), and forced style/layout with the JS stacks that forced it;
+ * - the accessibility tree's serialization inside the window, which Chrome
+ *   does only while an accessibility client is on (`--force-accessibility`
+ *   turns it on);
  * - React commits and renders inside the window with `--render-probe`;
  * - the transition the browser actually ran, and the target's width before
  *   and after.
@@ -28,13 +31,14 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import process from "node:process"
 
+import { ACCESSIBILITY_CATEGORY, accessibilityInWindow, accessibilityState, describeAccessibility, FORCE_ACCESSIBILITY_ARGS } from "./perf/accessibility.mjs"
 import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "./perf/cdp.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
 import { percentile, round } from "./perf/metrics.mjs"
 import { buildRenderProbeSource, printRenderProbe, readRenderProbe, RENDER_PROBE_GLOBAL, summarizeRenderProbe } from "./perf/render-probe.mjs"
 import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
 import { analyzeToggleWindow, estimateRefreshMs, frameStats, measuredToggles, rendersInWindow, summarizeByType } from "./perf/toggle-analysis.mjs"
-import { shortUrl } from "./perf/trace-analysis.mjs"
+import { rendererMainThread, shortUrl } from "./perf/trace-analysis.mjs"
 
 // Rail icon of each context surface (lib/surfaces/registry.ts; diff draws
 // DiffViewIcon, whose glyph is layout-column). Icons, not labels, so the
@@ -123,7 +127,12 @@ Instruments:
                            positive controls); the summary is marked modified
   --extra-categories <list>
                            Comma-separated trace categories to add (such as cc,gpu
-                           to see the compositor behind a long main-thread Commit)
+                           to see the compositor behind a long main-thread Commit).
+                           The accessibility category is always recorded
+  --force-accessibility    Launch Chrome with its accessibility tree on, as an
+                           accessibility client (a screen reader, or a macOS app
+                           that reads other windows) turns it on, so every
+                           machine and headless runs measure that case
 
 Output:
   --output <directory>     Artifact directory (default: artifacts/toggle-profile-<time>)
@@ -148,7 +157,7 @@ const parseArgs = (argv) => {
   const options = {
     url: "http://localhost:3000", title: "perf: long 120", session: null, phases: Object.keys(PHASES), surface: "file", openFile: null,
     method: "click", mod: null, count: 5, warmup: 1, hover: 400, pre: 400, window: 2000, tail: 250, settle: 1000,
-    loadSettle: 12, reducedMotion: false, renderProbe: false, renderProbeHook: null, cpuProfile: false, injectScript: null, extraCategories: [],
+    loadSettle: 12, reducedMotion: false, renderProbe: false, renderProbeHook: null, cpuProfile: false, injectScript: null, extraCategories: [], forceAccessibility: false,
     output: null, label: null, chrome: null, profileDir: null, headless: false,
   }
   for (let index = 0; index < argv.length; index += 1) {
@@ -176,6 +185,7 @@ const parseArgs = (argv) => {
     else if (value === "--cpu-profile") options.cpuProfile = true
     else if (value === "--inject-script") options.injectScript = argv[++index]
     else if (value === "--extra-categories") options.extraCategories = String(argv[++index]).split(",").map((name) => name.trim()).filter(Boolean)
+    else if (value === "--force-accessibility") options.forceAccessibility = true
     else if (value === "--output") options.output = argv[++index]
     else if (value === "--label") options.label = argv[++index]
     else if (value === "--chrome") options.chrome = argv[++index]
@@ -450,7 +460,7 @@ const main = async () => {
   await mkdir(output, { recursive: true })
   const port = await reservePort()
   const profile = resolveProfileDir(options.profileDir, "toggle")
-  const chromeProcess = launchChrome({ chrome: resolveChrome(options.chrome), profileDir: profile.dir, port, headless: options.headless })
+  const chromeProcess = launchChrome({ chrome: resolveChrome(options.chrome), profileDir: profile.dir, port, headless: options.headless, extraArgs: options.forceAccessibility ? FORCE_ACCESSIBILITY_ARGS : [] })
   let client
   try {
     const target = await createPageTarget(port)
@@ -603,19 +613,19 @@ const main = async () => {
       await client.send("Profiler.setSamplingInterval", { interval: 250 })
       await client.send("Profiler.start")
     }
-    await client.send("Tracing.start", {
-      transferMode: "ReportEvents",
-      // `RunTask` needs the disabled-by-default timeline category; `.stack`
-      // records the JS stack on forced style recalcs and layouts.
-      categories: [
-        "devtools.timeline",
-        "disabled-by-default-devtools.timeline",
-        "disabled-by-default-devtools.timeline.frame",
-        "disabled-by-default-devtools.timeline.stack",
-        "blink.user_timing",
-        ...options.extraCategories,
-      ].join(","),
-    })
+    // `RunTask` needs the disabled-by-default timeline category; `.stack`
+    // records the JS stack on forced style recalcs and layouts; the
+    // accessibility category says whether a tree was built and what it cost.
+    const categories = [...new Set([
+      "devtools.timeline",
+      "disabled-by-default-devtools.timeline",
+      "disabled-by-default-devtools.timeline.frame",
+      "disabled-by-default-devtools.timeline.stack",
+      "blink.user_timing",
+      ACCESSIBILITY_CATEGORY,
+      ...options.extraCategories,
+    ])]
+    await client.send("Tracing.start", { transferMode: "ReportEvents", categories: categories.join(",") })
     const probeStartedAt = options.renderProbe
       ? await evaluateValue(client, `(() => { globalThis[${JSON.stringify(RENDER_PROBE_GLOBAL)}]?.start(); return performance.now() })()`)
       : null
@@ -680,6 +690,7 @@ const main = async () => {
             timedOut: raw.timedOut,
             renders: probeStartedAt === null ? null : { fromMs: raw.t0 - probeStartedAt, toMs: raw.endAt - probeStartedAt },
             trace: null,
+            accessibility: null,
             failures: [],
             warnings: [],
             valid: false,
@@ -735,6 +746,7 @@ const main = async () => {
       if (start === undefined || end === undefined) toggle.failures.push("its marks are missing from the trace")
       else {
         toggle.trace = analyzeToggleWindow(traceEvents, { start, end, inputTypes: [toggle.inputType ?? (options.method === "key" ? "keydown" : "click")] })
+        toggle.accessibility = accessibilityInWindow(traceEvents, { main: rendererMainThread(traceEvents, { start, end }).main, start, end, recorded: true })
         if (!toggle.trace.mainThreadFound) toggle.failures.push("the trace has no renderer main thread in its window")
         else if (toggle.trace.inputTaskMs === null) toggle.warnings.push("no input task found on the trace")
       }
@@ -783,6 +795,7 @@ const main = async () => {
       frameLiveness,
       refreshMs: refreshValues.length ? round(percentile(refreshValues, 0.5)) : null,
       metrics: { taskCount },
+      accessibility: accessibilityState(traceEvents, { categories, forced: options.forceAccessibility }),
       toggleValidity: { ok: failures.length === 0, failures },
       byType: summarizeByType(toggles),
       forcedStacks,
@@ -794,10 +807,10 @@ const main = async () => {
     if (profile) await writeFile(join(output, "cpu-profile.cpuprofile"), JSON.stringify(profile))
     if (renderProbeRaw) await writeFile(join(output, "render-probe.json"), renderProbeRaw)
 
-    console.log(`\nPer toggle type, median / p95 over ${options.count} measured toggles each (refresh ${summary.refreshMs ?? "?"} ms):`)
+    console.log(`\nPer toggle type, median / p95 over ${options.count} measured toggles each (refresh ${summary.refreshMs ?? "?"} ms; ${describeAccessibility(summary.accessibility)}):`)
     const cell = (entry, unit = "ms") => (entry ? `${round(entry.median, 1)}/${round(entry.p95, 1)}${unit}` : "-")
     for (const [type, stats] of Object.entries(summary.byType)) {
-      console.log(`  ${type.padEnd(20)} n=${stats.n}  next frame ${cell(stats.inputToNextFrameMs)}  input task ${cell(stats.inputTaskMs)}  worst frame ${cell(stats.worstFrameMs)}  dropped ${cell(stats.droppedFrames, "")}  style+layout ${cell(stats.styleLayoutMs)} (${cell(stats.elementsRestyled, "")} elements)  forced ${cell(stats.forcedLayouts, "")}  transition ${cell(stats.observedTransitionMs)}${stats.commits ? `  commits ${cell(stats.commits, "")}` : ""}`)
+      console.log(`  ${type.padEnd(20)} n=${stats.n}  next frame ${cell(stats.inputToNextFrameMs)}  input task ${cell(stats.inputTaskMs)}  worst frame ${cell(stats.worstFrameMs)}  dropped ${cell(stats.droppedFrames, "")}  style+layout ${cell(stats.styleLayoutMs)} (${cell(stats.elementsRestyled, "")} elements)  forced ${cell(stats.forcedLayouts, "")}  accessibility ${cell(stats.accessibilityMs)}  transition ${cell(stats.observedTransitionMs)}${stats.commits ? `  commits ${cell(stats.commits, "")}` : ""}`)
     }
     if (forcedStacks.length) {
       console.log("\nForced style/layout by stack (measured toggles):")

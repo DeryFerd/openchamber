@@ -74,6 +74,7 @@ const RUN_METRICS = {
     [traceMetric("tasksOver16msCount"), "main tasks >16.7 ms", LOWER],
     [traceMetric("tasksOver8msCount"), "main tasks >8.33 ms", LOWER],
     [traceMetric("finalizeLongestTaskMs"), "longest task ≤1 s after idle ms", LOWER],
+    [traceMetric("accessibilityMs"), "accessibility ms", LOWER],
     [traceMetric("taskP99Ms"), "task p99 ms", LOWER],
     [metric("mainThreadBusyPercent"), "main-thread busy %", LOWER],
     [metric("busyMsPerKilochar"), "busy ms per 1k chars", LOWER],
@@ -135,6 +136,7 @@ const SWITCH_METRICS = [
   [(entry) => entry.content, "content ms"],
   [(entry) => entry.visible, "visible ms"],
   [(entry) => entry.longestTask, "longest task ms"],
+  [(entry) => entry.accessibility?.ms, "accessibility ms"],
   [(entry) => entry.shift?.maxPx, "shift after reveal px"],
   [(entry) => entry.requestCount, "requests"],
   [(entry) => entry.network?.decodedKb, "decoded KB"],
@@ -264,6 +266,34 @@ const componentTable = (beforeRuns, afterRuns) => {
   ]
 }
 
+/**
+ * Whether the runs built an accessibility tree. Chrome builds one only while a
+ * client asks (a screen reader, a macOS app that reads other windows, or
+ * `--force-accessibility`), and it adds a serialization pass to frames that
+ * change what it exposes, so runs with and without one do not compare.
+ */
+const accessibilityOf = (run) => {
+  const state = run.data.accessibility
+  if (!state?.recorded) return "not recorded"
+  if (!state.active) return "off"
+  return state.forced ? "on (forced)" : "on (client)"
+}
+
+const accessibilityLines = (beforeRuns, afterRuns) => {
+  const describe = (runs) => {
+    const counts = new Map()
+    for (const run of runs) counts.set(accessibilityOf(run), (counts.get(accessibilityOf(run)) ?? 0) + 1)
+    return counts
+  }
+  const before = describe(beforeRuns)
+  const after = describe(afterRuns)
+  if (before.size === 1 && after.size === 1 && before.has("not recorded") && after.has("not recorded")) return []
+  const text = (counts) => [...counts].map(([state, count]) => `${state} in ${count}`).join(", ")
+  const states = new Set([...before.keys(), ...after.keys()])
+  const differs = states.size > 1 && !(states.size === 2 && states.has("not recorded"))
+  return [`${differs ? "ACCESSIBILITY DIFFERS, timings do not compare: " : ""}accessibility tree before: ${text(before)}; after: ${text(after)}`]
+}
+
 /** Validity notes per side for one scenario. */
 const validityLines = (side, runs) => {
   const lines = []
@@ -312,7 +342,7 @@ export const compareResultDirs = (beforeRoot, afterRoot, { scenarios = [] } = {}
       lines.push(`| ${label} | ${formatSide(beforeStats)} | ${formatSide(afterStats)} | ${formatDelta(beforeStats, afterStats)} | ${verdictOf(beforeStats, afterStats, entry.lowerIsBetter)} |`)
     }
     lines.push(...componentTable(beforeRuns, afterRuns))
-    const validity = [...validityLines("before", beforeRuns), ...validityLines("after", afterRuns)]
+    const validity = [...validityLines("before", beforeRuns), ...validityLines("after", afterRuns), ...accessibilityLines(beforeRuns, afterRuns)]
     if (validity.length) lines.push("", ...validity.map((line) => `- ${line}`))
   }
   return lines.join("\n")
