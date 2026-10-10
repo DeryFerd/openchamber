@@ -4229,7 +4229,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     className={cn(
                         "flex flex-col relative overflow-visible",
                         isComposerExpanded && 'flex-1 min-h-0',
-                        "border border-border/80 focus-within:border-interactive-selection-foreground/35",
+                        "border border-border/80",
                         // The box floats over the transcript, so it is glass.
                         'oc-glass-composer',
                         isDragging && "ring-2 ring-primary ring-offset-2"
