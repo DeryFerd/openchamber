@@ -23,6 +23,7 @@ import {
   desktopLocalClientTokenGet,
   desktopOpenNewWindowAtUrl,
   desktopOpenNewWindowForHost,
+  desktopSwitchToLocal,
   getDesktopHostApiUrl,
   normalizeHostUrl,
   probeRelayDesktopHost,
@@ -33,10 +34,10 @@ import {
 } from '@/lib/desktopHosts';
 import {
   LOCAL_HOST_ID,
-  buildLocalDesktopHost,
   getLocalDesktopOrigin,
   resolveCurrentDesktopHost,
   runtimeKeyForDesktopHost,
+  withLocalDesktopHost,
 } from '@/lib/desktopCurrentHost';
 import {
   getDesktopHostStatusSnapshot,
@@ -293,12 +294,11 @@ export function DesktopHostSwitcherDialog({
   const switchTokenRef = React.useRef(0);
 
   const allHosts = React.useMemo(() => {
-    const local = buildLocalDesktopHost(localOrigin);
     const normalizedRemote = configHosts.map((h) => ({
       ...h,
       url: normalizeHostUrl(h.url) || h.url,
     }));
-    return [local, ...normalizedRemote];
+    return withLocalDesktopHost(normalizedRemote, localOrigin);
   }, [configHosts, localOrigin]);
 
   React.useEffect(() => {
@@ -485,6 +485,14 @@ export function DesktopHostSwitcherDialog({
         return;
       }
       setSwitchingHostId(host.id);
+      // A page served by another instance cannot reach the local server, so
+      // the desktop shell loads the Local UI into the window. On the app's own
+      // pages it declines, and the switch below happens in place.
+      if (host.id === LOCAL_HOST_ID && await desktopSwitchToLocal()) {
+        onHostSwitched?.();
+        setSwitchingHostId(null);
+        return;
+      }
       // A tunnel opened above makes the cached probe of the old forward stale.
       const sshJustConnected = host !== selectedHost;
       const clientToken = host.id === LOCAL_HOST_ID ? await getLocalClientToken() : (host.clientToken || '');

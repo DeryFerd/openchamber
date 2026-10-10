@@ -63,9 +63,8 @@ import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, is
 import { desktopHostsGet, redactSensitiveUrl } from '@/lib/desktopHosts';
 import {
   LOCAL_HOST_ID,
-  buildLocalDesktopHost,
-  getLocalDesktopOrigin,
   resolveCurrentDesktopHost,
+  withLocalDesktopHost,
 } from '@/lib/desktopCurrentHost';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -475,8 +474,7 @@ export const Header: React.FC = () => {
       // Same resolution the host switcher's own header uses, so the button and
       // the panel it opens can never disagree about which instance this is.
       const cfg = await desktopHostsGet();
-      const localOrigin = getLocalDesktopOrigin();
-      const resolved = resolveCurrentDesktopHost([buildLocalDesktopHost(localOrigin), ...cfg.hosts]);
+      const resolved = resolveCurrentDesktopHost(withLocalDesktopHost(cfg.hosts, cfg.localOrigin));
 
       if (resolved.id === LOCAL_HOST_ID) {
         setCurrentInstanceLabel('Local');

@@ -404,6 +404,18 @@ export const desktopLocalClientTokenGet = async (): Promise<string> => {
 };
 
 /**
+ * Asks the desktop shell to load the Local UI into this window. True when it
+ * does, which happens when the page belongs to another instance and cannot
+ * switch to Local in place. False on the app's own pages and from a shell
+ * without the command.
+ */
+export const desktopSwitchToLocal = async (): Promise<boolean> => {
+  const invoke = getInvoke();
+  if (!invoke) return false;
+  return (await invoke('desktop_switch_to_local').catch(() => false)) === true;
+};
+
+/**
  * Stable per-install identifier for this desktop. Used as the client dedupe key
  * so re-pairing or re-authenticating this desktop reuses its single device
  * record on a server instead of piling up duplicates. Empty string when not in
