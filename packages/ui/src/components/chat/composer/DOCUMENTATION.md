@@ -66,7 +66,10 @@ reply resolves its directory from the store that holds the form.
 session, its subagents' included, in the same frame: one dot per pending
 request with the current one solid, the request's tool in the header, and
 Deny / Always allow / Allow once through the shared response hook, so
-Alt+Enter, Alt+Shift+Enter and Alt+Backspace answer the current request. A
+Alt+Enter, Alt+Shift+Enter and Alt+Backspace answer the current request.
+Always allow and its shortcut exist only when the request carries `save`
+patterns: OpenCode remembers nothing from an "always" without them, so the
+question tool's request offers Deny and Allow once. A
 pending permission hides the form dock and the suggestion.
 The BTW sheet keeps the inline `PermissionCard` for its child session's
 requests; both render the request through `PermissionRequestContent` and

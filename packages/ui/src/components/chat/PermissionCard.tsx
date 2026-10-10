@@ -14,7 +14,7 @@ import { permissionFilePreviewsSchema } from './permissionFilePreviews';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { toolFileDiffs } from '@/lib/opencode/tools';
 import { getPermissionToolPresentation, getToolDisplayName } from './permissionToolPresentation';
-import { describeSavePatterns, permissionSummaryMetadataSchema, summarizePermission, type PermissionTarget } from './permissionSummary';
+import { canSavePermission, describeSavePatterns, permissionSummaryMetadataSchema, summarizePermission, type PermissionTarget } from './permissionSummary';
 import { usePermissionFromSubagent, usePermissionResponse } from './usePermissionResponse';
 
 const PERMISSION_BASH_CUSTOM_STYLE: React.CSSProperties = {
@@ -369,6 +369,7 @@ export const PermissionActions: React.FC<{
   const { t } = useI18n();
   const always = useAlwaysLabel(permission);
   const hasSave = always.full !== undefined;
+  const canSave = canSavePermission(permission.save);
 
   if (variant === 'dock') {
     return (
@@ -379,11 +380,13 @@ export const PermissionActions: React.FC<{
           <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+backspace')}</kbd>
         </Button>
         <div className="min-w-0 flex-1" />
-        <Button variant="outline" size="xs" disabled={isResponding} onClick={() => onRespond('always')} title={always.full}>
-          <Icon name="time" className="size-3.5" />
-          <span className="max-w-[180px] truncate">{always.label}</span>
-          {!hasSave ? <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd> : null}
-        </Button>
+        {canSave ? (
+          <Button variant="outline" size="xs" disabled={isResponding} onClick={() => onRespond('always')} title={always.full}>
+            <Icon name="time" className="size-3.5" />
+            <span className="max-w-[180px] truncate">{always.label}</span>
+            {!hasSave ? <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd> : null}
+          </Button>
+        ) : null}
         <Button size="xs" disabled={isResponding} onClick={() => onRespond('once')}>
           {isResponding ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : <Icon name="check" className="size-3.5" />}
           {t('chat.permissionCard.allowOnce')}
@@ -416,18 +419,20 @@ export const PermissionActions: React.FC<{
         <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+enter')}</kbd>
       </button>
 
-      <button
-        onClick={() => onRespond('always')}
-        disabled={isResponding}
-        title={always.full}
-        className={rowClass}
-        style={{ backgroundColor: 'rgb(var(--muted) / 0.5)', color: 'var(--muted-foreground)' }}
-        {...hover('rgb(var(--muted) / 0.5)', 'rgb(var(--muted) / 0.7)')}
-      >
-        <Icon name="time" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
-        <span className="truncate max-w-[180px]">{always.label}</span>
-        {!hasSave ? <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd> : null}
-      </button>
+      {canSave ? (
+        <button
+          onClick={() => onRespond('always')}
+          disabled={isResponding}
+          title={always.full}
+          className={rowClass}
+          style={{ backgroundColor: 'rgb(var(--muted) / 0.5)', color: 'var(--muted-foreground)' }}
+          {...hover('rgb(var(--muted) / 0.5)', 'rgb(var(--muted) / 0.7)')}
+        >
+          <Icon name="time" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
+          <span className="truncate max-w-[180px]">{always.label}</span>
+          {!hasSave ? <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd> : null}
+        </button>
+      ) : null}
 
       <button
         onClick={() => onRespond('reject')}
