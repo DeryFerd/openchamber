@@ -197,14 +197,37 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
   });
 
   it('prefers the selected Console account and organization over the legacy key', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify(consolePayload())));
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(consolePayload())));
     const result = await fetchQuota({
       readAuth: async () => ({ ...consoleAuth(), 'opencode-go': { key: 'stale-key' } }),
       fetchImpl,
     });
     expect(result.ok).toBe(true);
-    expect(fetchImpl.mock.calls[0][0]).toBe(CONSOLE_STATUS_URL);
-    expect(fetchImpl.mock.calls[0][1].headers['x-org-id']).toBe('org_TESTORG123');
+    const statusCall = fetchImpl.mock.calls.find((call) => call[0] === CONSOLE_STATUS_URL);
+    expect(statusCall[1].headers['x-org-id']).toBe('org_TESTORG123');
+    expect(fetchImpl.mock.calls.map((call) => call[0])).not.toContain('https://opencode.ai/zen/go/v1/usage');
+  });
+
+  it('reads the billing balance alongside the Go status, not after it', async () => {
+    const requested = [];
+    let billingRequestedBeforeStatusAnswered = false;
+    const fetchImpl = vi.fn(async (url) => {
+      requested.push(url);
+      if (url === CONSOLE_STATUS_URL) {
+        billingRequestedBeforeStatusAnswered = requested.includes(CONSOLE_BILLING_STATUS_URL);
+        return new Response(JSON.stringify(consolePayload()));
+      }
+      return new Response(JSON.stringify({ availableMicroCents: '2500000' }));
+    });
+    const result = await fetchQuota({ readAuth: async () => consoleAuth(), fetchImpl });
+    expect(billingRequestedBeforeStatusAnswered).toBe(true);
+    expect(result.usage.windows.credits_balance.valueLabel).toBe('$2.50');
+  });
+
+  it('does not read the billing balance with a locally expired sign-in', async () => {
+    const fetchImpl = vi.fn(async () => new Response('{}'));
+    await fetchQuota({ readAuth: async () => consoleAuth({ expires: Date.now() - 1000 }), fetchImpl });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('falls back to the legacy key when the Console read fails', async () => {
@@ -217,7 +240,10 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     });
     expect(result.ok).toBe(true);
     expect(result.usage.windows['5h'].usedPercent).toBe(10);
-    expect(fetchImpl.mock.calls.map((call) => call[0])).toEqual([CONSOLE_STATUS_URL, 'https://opencode.ai/zen/go/v1/usage']);
+    // The billing read starts alongside the Go status; its result is dropped
+    // when the Console read fails.
+    expect(fetchImpl.mock.calls.map((call) => call[0])).toEqual([CONSOLE_BILLING_STATUS_URL, CONSOLE_STATUS_URL, 'https://opencode.ai/zen/go/v1/usage']);
+    expect(result.usage.windows.credits_balance).toBeUndefined();
   });
 
   it('reports the Console error when there is no key to fall back to', async () => {

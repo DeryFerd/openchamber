@@ -271,7 +271,10 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
 
     const result = await fetchQuotaForProvider('opencode-go');
 
-    assert.deepEqual(requestedUrls, ['https://opencode.ai/console/api/go/status', 'https://opencode.ai/zen/go/v1/usage']);
+    // The billing read starts alongside the Go status; its result is dropped
+    // when the Console read fails.
+    assert.deepEqual(requestedUrls, ['https://opencode.ai/console/api/billing/status', 'https://opencode.ai/console/api/go/status', 'https://opencode.ai/zen/go/v1/usage']);
+    assert.equal(result.usage!.windows.credits_balance, undefined);
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows['5h']!.usedPercent, 10);
   });

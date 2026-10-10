@@ -130,8 +130,9 @@ const fetchApiKeyUsage = async (credential: OpenCodeGoApiKeyCredential) => {
 
 // Best-effort. The Go meters are the authoritative result, so a billing read
 // that fails (network, HTTP, malformed) drops the credits row instead of failing
-// the refresh or reporting a $0.00 balance. It runs only after a successful Go
-// read, so the token is already known to be valid.
+// the refresh or reporting a $0.00 balance. It runs alongside the Go read, so a
+// slow billing endpoint never delays the meters by more than the slower of the
+// two requests; its result is used only when the Go read succeeds.
 const fetchConsoleBillingBalance = async (credential: OpenCodeGoConsoleCredential) => {
   try {
     const response = await fetch(CONSOLE_BILLING_STATUS_URL, {
@@ -154,6 +155,7 @@ const fetchConsoleUsage = async (credential: OpenCodeGoConsoleCredential) => {
   if (credential.expires != null && credential.expires > 0 && credential.expires <= Date.now()) {
     throw new Error('OpenCode Console sign-in expired. Sign in again in Providers.');
   }
+  const balanceRead = fetchConsoleBillingBalance(credential);
   const response = await fetch(CONSOLE_STATUS_URL, {
     headers: { Accept: 'application/json', Authorization: `Bearer ${credential.accessToken}`, 'x-org-id': credential.orgID },
     // The bearer token belongs to opencode.ai/console; never follow a redirect
@@ -168,7 +170,7 @@ const fetchConsoleUsage = async (credential: OpenCodeGoConsoleCredential) => {
   if (!parsed.data.product || !CONSOLE_PRODUCTS.has(parsed.data.product)) throw new Error('No active OpenCode Go subscription on the selected Console account');
   const windows = parseConsoleUsage(parsed.data);
   if (!Object.keys(windows).length) throw new Error('OpenCode Go usage data could not be parsed');
-  const balance = await fetchConsoleBillingBalance(credential);
+  const balance = await balanceRead;
   if (balance !== null) windows.credits_balance = toBalanceWindow(`$${balance.toFixed(2)}`);
   return windows;
 };

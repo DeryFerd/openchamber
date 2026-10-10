@@ -131,8 +131,10 @@ export const fetchOpenCodeGoUsage = async (apiKey, fetchImpl = fetch) => {
   return windows;
 };
 
+const isConsoleSignInExpired = (expires) => expires !== null && expires > 0 && expires <= Date.now();
+
 export const fetchConsoleGoUsage = async ({ access, orgID, expires }, fetchImpl = fetch) => {
-  if (expires !== null && expires > 0 && expires <= Date.now()) {
+  if (isConsoleSignInExpired(expires)) {
     throw new Error('OpenCode Console sign-in expired. Sign in again in Providers.');
   }
   const response = await fetchImpl(CONSOLE_STATUS_URL, {
@@ -164,8 +166,10 @@ export const fetchConsoleGoUsage = async ({ access, orgID, expires }, fetchImpl 
 /**
  * Best-effort. The Go meters are the authoritative result, so a billing read
  * that fails (network, HTTP, malformed, or an expired token) drops the credits
- * row instead of failing the refresh or reporting a $0.00 balance. It runs only
- * after a successful Go read, so the token is already known to be valid.
+ * row instead of failing the refresh or reporting a $0.00 balance. It runs
+ * alongside the Go read, so a slow billing endpoint never delays the meters by
+ * more than the slower of the two requests; its result is used only when the Go
+ * read succeeds.
  */
 export const fetchConsoleBillingBalance = async ({ access, orgID }, fetchImpl = fetch) => {
   try {
@@ -221,8 +225,11 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
     const apiKey = getApiKey(auth);
     if (consoleCredential) {
       try {
+        const balanceRead = isConsoleSignInExpired(consoleCredential.expires)
+          ? Promise.resolve(null)
+          : fetchConsoleBillingBalance(consoleCredential, fetchImpl);
         const windows = await fetchConsoleGoUsage(consoleCredential, fetchImpl);
-        const balance = await fetchConsoleBillingBalance(consoleCredential, fetchImpl);
+        const balance = await balanceRead;
         const usageWindows = balance === null
           ? windows
           : {
