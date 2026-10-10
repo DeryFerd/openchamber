@@ -756,8 +756,15 @@ export function DesktopHostSwitcherDialog({
       detail: null,
       phase: 'idle',
     }));
+    if (!localOrigin) return;
     const localTarget = toNavigationUrl(localOrigin);
     if (isElectronShell()) {
+      // Same as choosing Local in the list: a page served by another instance
+      // cannot switch in place, so the desktop shell loads the Local UI.
+      if (await desktopSwitchToLocal()) {
+        onHostSwitched?.();
+        return;
+      }
       const clientToken = await getLocalClientToken();
       switchRuntimeEndpoint({ apiBaseUrl: localOrigin, clientToken: clientToken || null, runtimeKey: 'local' });
       onHostSwitched?.();
@@ -1151,14 +1158,16 @@ export function DesktopHostSwitcherDialog({
         </DialogHeader>
         {switchModal.error ? (
           <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => void switchToLocal()}
-            >
-              {t('desktopHostSwitcher.actions.switchToLocal')}
-            </Button>
+            {localOrigin ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void switchToLocal()}
+              >
+                {t('desktopHostSwitcher.actions.switchToLocal')}
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="sm"
