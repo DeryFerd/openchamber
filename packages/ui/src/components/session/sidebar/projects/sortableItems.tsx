@@ -11,7 +11,7 @@ import {
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Icon } from '@/components/icon/Icon';
-import { cn } from '@/lib/utils';
+import { cn, getRevealLabelKey } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
@@ -120,6 +120,7 @@ interface SortableProjectItemProps extends ProjectIdentityProps {
   onManageWorktrees?: () => void;
   /** The project's isolated spaces page; absent while the feature is off, and always in VS Code. */
   onManageSpaces?: () => void;
+  onOpenFolder?: () => void;
   onRenameStart: () => void;
   /** Archives the project's sessions except pinned, running and In work ones. */
   onArchiveAll?: () => void;
@@ -154,6 +155,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   onNewWorktreeSession,
   onManageWorktrees,
   onManageSpaces,
+  onOpenFolder,
   onRenameStart,
   onArchiveAll,
   onClose,
@@ -208,6 +210,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
         <Item onClick={onManageSpaces}>
           <Icon name="box-3" className="mr-1.5 h-4 w-4" />
           {t('spaces.page.menuItem')}
+        </Item>
+      )}
+      {onOpenFolder && (
+        <Item onClick={onOpenFolder}>
+          <Icon name="folder-received" className="mr-1.5 h-4 w-4" />
+          {t(getRevealLabelKey())}
         </Item>
       )}
       <Item onClick={onRenameStart}>

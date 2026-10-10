@@ -22,6 +22,7 @@ import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { spaceTakesNoNewSession, useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChildStoreManager } from '@/sync/sync-context';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { ProjectSortOrder, WorktreeSortOrder } from '@/stores/useSessionDisplayStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { Icon } from '@/components/icon/Icon';
@@ -128,6 +129,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
   streamPerfCount('ui.sidebar_projects_list.render');
   const { t } = useI18n();
   const childStores = useChildStoreManager();
+  const { files } = useRuntimeAPIs();
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
   const renameFolder = useSessionFoldersStore((state) => state.renameFolder);
   const deleteFolder = useSessionFoldersStore((state) => state.deleteFolder);
@@ -194,6 +196,13 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
         : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
     }
   }, [confirmArchiveAll, t]);
+
+  const openProjectFolder = React.useCallback((projectPath: string) => {
+    if (!files.revealPath) return;
+    void files.revealPath(projectPath).catch(() => {
+      toast.error(t('sidebarFilesTree.toast.revealFailed'));
+    });
+  }, [files, t]);
 
   const stickyDescriptorIndex = React.useMemo(() => {
     if (!view.stickyZoneHeaders) return -1;
@@ -350,6 +359,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
         }}
         onManageWorktrees={() => actions.openWorktreesPage(project.id)}
         onManageSpaces={spacesPageAvailable ? () => useUIStore.getState().setSpacesPageProjectId(project.id) : undefined}
+        onOpenFolder={project.normalizedPath && files.revealPath ? () => openProjectFolder(project.normalizedPath) : undefined}
         onRenameStart={() => actions.openProjectEditDialog(project.id)}
         onArchiveAll={() => void requestArchiveAll(label, row.section.groups)}
         onClose={() => actions.removeProject(project.id)}
@@ -472,7 +482,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     return <div className="py-1 pl-[26px] text-left typography-micro text-muted-foreground">
       {row.emptyKind === 'archived' ? t('sessions.sidebar.group.empty.noArchivedSessions') : row.group?.emptyMessage ?? t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
     </div>;
-  }, [actions, deleteFolder, model, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesJourney, spacesPageAvailable, t, toggleFolderCollapse, view]);
+  }, [actions, deleteFolder, files, model, openProjectFolder, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesJourney, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
   const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => row.kind === 'project-header' ? [row.section.project.id] : row.kind === 'group-header' ? [row.groupKey] : []), [model.rowModel.rows]);
   const projectDragIds = React.useMemo(() => new Set(model.sectionsForRender.map((section) => section.project.id)), [model.sectionsForRender]);
