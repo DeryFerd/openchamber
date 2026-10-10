@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
+import { rebaseMovedPath } from '@/lib/filePathMoves';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type RootTabsState = {
@@ -24,6 +25,8 @@ type FilesViewTabsActions = {
   /** Drops a stale open path. The path on screen stays, so its tab keeps showing its own error. */
   removeUnselectedOpenPath: (root: string, path: string) => void;
   removeExpandedPathsByPrefix: (root: string, prefixPath: string) => void;
+  /** Points open, selected and expanded paths at or under `fromPath` at `toPath` after a move or rename. */
+  movePaths: (root: string, fromPath: string, toPath: string) => void;
   setSelectedPath: (root: string, path: string | null, options?: { allowOutsideRoot?: boolean }) => void;
   ensureSelectedPath: (root: string) => void;
   toggleExpandedPath: (root: string, path: string) => void;
@@ -352,6 +355,48 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
               },
             };
 
+            return { byRoot: clampRoots(byRoot, MAX_ROOTS) };
+          });
+        },
+
+        movePaths: (root, fromPath, toPath) => {
+          const normalizedRoot = normalizePath((root || '').trim());
+          const normalizedFrom = normalizePath((fromPath || '').trim());
+          const normalizedTo = normalizePath((toPath || '').trim());
+          if (!normalizedRoot || !normalizedFrom || !normalizedTo || normalizedFrom === normalizedTo) {
+            return;
+          }
+
+          set((state) => {
+            const current = state.byRoot[normalizedRoot];
+            if (!current) {
+              return state;
+            }
+
+            let changed = false;
+            const rebase = (candidate: string): string => {
+              const moved = rebaseMovedPath(candidate, normalizedFrom, normalizedTo);
+              if (moved === null) return candidate;
+              changed = true;
+              return moved;
+            };
+            const openPaths = Array.from(new Set(current.openPaths.map(rebase)));
+            const expandedPaths = Array.from(new Set(current.expandedPaths.map(rebase)));
+            const selectedPath = current.selectedPath ? rebase(current.selectedPath) : null;
+            if (!changed) {
+              return state;
+            }
+
+            const byRoot = {
+              ...state.byRoot,
+              [normalizedRoot]: {
+                ...current,
+                openPaths,
+                selectedPath,
+                expandedPaths,
+                touchedAt: Date.now(),
+              },
+            };
             return { byRoot: clampRoots(byRoot, MAX_ROOTS) };
           });
         },

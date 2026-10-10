@@ -678,6 +678,7 @@ describe('fs rename', () => {
     await registerRename(fsPromises)({ body: { oldPath: '/repo/a.txt', newPath: '/repo/b.txt' } }, res);
 
     expect(res.statusCode).toBe(404);
+    expect(res.body.reason).toBe('not-found');
     expect(fsPromises.rename).not.toHaveBeenCalled();
   });
 });
@@ -840,6 +841,76 @@ describe('fs upload', () => {
     expect(res.statusCode).toBe(409);
     expect(res.body).toEqual({ error: 'File already exists', reason: 'already-exists' });
     expect(fsPromises.unlink).toHaveBeenCalledWith(expect.stringMatching(/^\/repo\/file\.bin\.upload-/));
+  });
+});
+
+describe('fs rename on a real disk', () => {
+  let repo;
+  let rename;
+  beforeEach(async () => {
+    repo = await mkdtemp(path.join(tmpdir(), 'oc-fs-rename-'));
+    await mkdir(path.join(repo, 'src', 'nested'), { recursive: true });
+    await mkdir(path.join(repo, 'lib'), { recursive: true });
+    await nativeFs.writeFile(path.join(repo, 'src', 'a.ts'), 'source');
+    await nativeFs.writeFile(path.join(repo, 'lib', 'a.ts'), 'keep me');
+
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path,
+      fsPromises: nativeFs,
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: repo }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    const route = getRoute('POST', '/api/fs/rename');
+    rename = async (oldPath, newPath) => {
+      const res = createMockResponse();
+      await route({ body: { oldPath: path.join(repo, oldPath), newPath: path.join(repo, newPath) } }, res);
+      return res;
+    };
+  });
+  afterEach(async () => {
+    await rm(repo, { recursive: true, force: true });
+  });
+
+  it('moves a file into another folder', async () => {
+    const res = await rename('src/a.ts', 'src/nested/a.ts');
+
+    expect(res.body).toEqual({ success: true, path: path.join(repo, 'src/nested/a.ts') });
+    expect(await nativeFs.readFile(path.join(repo, 'src/nested/a.ts'), 'utf8')).toBe('source');
+    await expect(nativeFs.access(path.join(repo, 'src/a.ts'))).rejects.toThrow();
+  });
+
+  it('refuses to replace an existing file and leaves both files untouched', async () => {
+    const res = await rename('src/a.ts', 'lib/a.ts');
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'Destination path already exists', reason: 'already-exists' });
+    expect(await nativeFs.readFile(path.join(repo, 'lib/a.ts'), 'utf8')).toBe('keep me');
+    expect(await nativeFs.readFile(path.join(repo, 'src/a.ts'), 'utf8')).toBe('source');
+  });
+
+  it('refuses to replace an existing empty folder', async () => {
+    await mkdir(path.join(repo, 'lib', 'nested'));
+
+    const res = await rename('src/nested', 'lib/nested');
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body.reason).toBe('already-exists');
+    expect((await nativeFs.stat(path.join(repo, 'src/nested'))).isDirectory()).toBe(true);
+  });
+
+  it('refuses to move a folder into its own subfolder', async () => {
+    const res = await rename('src', 'src/nested/src');
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Cannot move a folder into itself' });
+    expect(await nativeFs.readFile(path.join(repo, 'src/a.ts'), 'utf8')).toBe('source');
   });
 });
 

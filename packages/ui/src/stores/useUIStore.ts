@@ -15,6 +15,7 @@ import type { ProjectRef } from '@/lib/projectContextApi';
 import type { PermissionMode } from './utils/permissionAutoAccept';
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
+import { rebaseMovedPath } from '@/lib/filePathMoves';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
@@ -683,6 +684,37 @@ const setContextPanelTabTargetPath = (
   ),
 });
 
+// A file tab's id and dedupe key are built from its path, so a moved tab is
+// rebuilt in place under the new id. A stale tab already at a destination
+// gives way to the moved one.
+const moveContextPanelFileTabs = (
+  current: ContextPanelDirectoryState,
+  fromPath: string,
+  toPath: string,
+): ContextPanelDirectoryState => {
+  let activeTabId = current.activeTabId;
+  const movedIds = new Set<string>();
+  const tabs = current.tabs.map((tab) => {
+    if (tab.mode !== 'file' || !tab.targetPath) return tab;
+    const targetPath = rebaseMovedPath(tab.targetPath, fromPath, toPath);
+    if (targetPath === null) return tab;
+    const keyFollowsPath = tab.dedupeKey === tab.targetPath;
+    const dedupeKey = keyFollowsPath ? targetPath : tab.dedupeKey;
+    const id = keyFollowsPath ? buildContextPanelTabID(tab.mode, dedupeKey) : tab.id;
+    if (current.activeTabId === tab.id) activeTabId = id;
+    movedIds.add(id);
+    return { ...tab, targetPath, dedupeKey, id };
+  });
+  if (movedIds.size === 0) return current;
+
+  return {
+    ...current,
+    tabs: tabs.filter((tab, index) => tab !== current.tabs[index] || !movedIds.has(tab.id)),
+    activeTabId,
+    touchedAt: Date.now(),
+  };
+};
+
 const sanitizeContextPanelByDirectory = (
   value: unknown,
 ): Record<string, ContextPanelDirectoryState> => {
@@ -924,6 +956,8 @@ interface UIStore {
   autoDeleteEnabled: boolean;
   /** Global file-editor autosave. Default true for backward compatibility. */
   autoSaveEnabled: boolean;
+  /** Ask before a drag in the files tree moves a file or folder. */
+  confirmFileTreeMove: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   sessionRetentionOnlyArchived: boolean;
@@ -1095,6 +1129,8 @@ interface UIStore {
   /** A new background browser tab for an agent at `url`; returns its tab id, or null where there is no browser. */
   openAgentBrowserTab: (directory: string, url: string, ownerSessionId: string | null) => string | null;
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
+  /** Points file tabs and the editor's open files at or under `fromPath` at `toPath` after a move or rename. */
+  moveContextFilePaths: (directory: string, fromPath: string, toPath: string) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
   closeContextPanelTab: (directory: string, tabID: string) => void;
@@ -1177,6 +1213,7 @@ interface UIStore {
   setAutoDeleteEnabled: (value: boolean) => void;
   setMergedWorktreeCleanupEnabled: (value: boolean) => void;
   setAutoSaveEnabled: (value: boolean) => void;
+  setConfirmFileTreeMove: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
   setSessionRetentionOnlyArchived: (value: boolean) => void;
@@ -1391,6 +1428,7 @@ export const useUIStore = create<UIStore>()(
         showDeletionDialog: true,
         autoDeleteEnabled: false,
         autoSaveEnabled: true,
+        confirmFileTreeMove: true,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         sessionRetentionOnlyArchived: false,
@@ -1785,6 +1823,26 @@ export const useUIStore = create<UIStore>()(
               },
             };
           });
+        },
+
+        moveContextFilePaths: (directory, fromPath, toPath) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedFrom = normalizeContextTargetPath(fromPath);
+          const normalizedTo = normalizeContextTargetPath(toPath);
+          if (!normalizedDirectory || !normalizedFrom || !normalizedTo || normalizedFrom === normalizedTo) return;
+          set((state) => {
+            const current = state.contextPanelByDirectory[normalizedDirectory];
+            if (!current) return state;
+            const next = moveContextPanelFileTabs(current, normalizedFrom, normalizedTo);
+            if (next === current) return state;
+            return {
+              contextPanelByDirectory: {
+                ...state.contextPanelByDirectory,
+                [normalizedDirectory]: next,
+              },
+            };
+          });
+          useFilesViewTabsStore.getState().movePaths(normalizedDirectory, normalizedFrom, normalizedTo);
         },
 
         setActiveContextPanelTab: (directory, tabID) => {
@@ -2370,6 +2428,10 @@ export const useUIStore = create<UIStore>()(
 
         setAutoSaveEnabled: (value) => {
           set({ autoSaveEnabled: value });
+        },
+
+        setConfirmFileTreeMove: (value) => {
+          set({ confirmFileTreeMove: value });
         },
 
         setAutoDeleteAfterDays: (days) => {
@@ -3362,6 +3424,7 @@ export const useUIStore = create<UIStore>()(
           showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
           autoSaveEnabled: state.autoSaveEnabled,
+          confirmFileTreeMove: state.confirmFileTreeMove,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
           sessionRetentionOnlyArchived: state.sessionRetentionOnlyArchived,

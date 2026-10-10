@@ -1568,6 +1568,13 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Source and destination must share the same workspace root' });
       }
 
+      if (
+        resolvedOld.resolved !== resolvedNew.resolved
+        && isPathWithinRoot(resolvedNew.resolved, resolvedOld.resolved, path, os)
+      ) {
+        return res.status(400).json({ error: 'Cannot move a folder into itself' });
+      }
+
       // fs.rename silently replaces an existing file. A destination that is the
       // source itself is a case-only rename on a case-insensitive filesystem.
       const [sourceStats, destinationStats] = await Promise.all([
@@ -1586,7 +1593,7 @@ export const registerFsRoutes = (app, dependencies) => {
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
-        return res.status(404).json({ error: 'Source path not found' });
+        return res.status(404).json({ error: 'Source path not found', reason: 'not-found' });
       }
       if (isOsPermissionError(err)) {
         return sendOsPermissionDenied(res, 'Access denied');

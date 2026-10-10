@@ -21,10 +21,13 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `POST /api/fs/write`
     - `POST /api/fs/upload`
     - `POST /api/fs/delete`
-    - `POST /api/fs/rename` — never replaces an existing destination: it
-      returns `409` with `reason: 'already-exists'`, except for a case-only
-      rename where the destination is the source itself. The check runs before
-      the rename, so a file created in between can still be replaced.
+    - `POST /api/fs/rename` — renames or moves within one workspace root and
+      never replaces an existing destination: it returns `409` with
+      `reason: 'already-exists'`, except for a case-only rename where the
+      destination is the source itself. The check runs before the rename, so
+      a file created in between can still be replaced. Moving a folder into
+      itself or into one of its subfolders returns `400`; a missing source
+      returns `404` with `reason: 'not-found'`.
      - `POST /api/fs/reveal`
      - `POST /api/fs/clone`
      - `POST /api/fs/exec`
