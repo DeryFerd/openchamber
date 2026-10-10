@@ -630,6 +630,16 @@ describe('listAuthenticatedProviders', () => {
     expect(await listAuthenticatedProviders()).toContain('claude-code');
   });
 
+  // OpenCode 2 answers with an empty catalog while it starts; caching that
+  // kept the pickers empty after the models arrived.
+  it('offers a provider as soon as a cold catalog fills in', async () => {
+    state.models = [];
+    expect(await listAuthenticatedProviders()).toEqual([]);
+
+    state.models = [MODEL()];
+    expect(await listAuthenticatedProviders()).toEqual(['anthropic']);
+  });
+
   it('answers an empty list when OpenCode is not reachable', async () => {
     configureOpenCodeRuntimeProviders(null);
 
