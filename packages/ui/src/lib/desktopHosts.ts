@@ -52,6 +52,8 @@ export type DesktopHost = {
   requestHeaders?: Record<string, string>;
   /** When set, this host is reached over the private relay tunnel. */
   relay?: DesktopHostRelay;
+  /** The native SSH manager currently forwards this host's API. Not stored. */
+  sshForwarded?: boolean;
 };
 
 /** Display-only pseudo-URL for a relay host (never fetched). */
@@ -328,7 +330,7 @@ const parseHost = (value: unknown): DesktopHost | null => {
   const requestHeaders = sanitizeRequestHeaders(value.requestHeaders);
   const relay = parseHostRelay(value.relay);
   if (!id || !label || !url) return null;
-  return {
+  const host: DesktopHost = {
     id,
     label,
     url,
@@ -337,6 +339,8 @@ const parseHost = (value: unknown): DesktopHost | null => {
     ...(requestHeaders ? { requestHeaders } : {}),
     ...(relay ? { relay } : {}),
   };
+  if (value.sshForwarded === true) host.sshForwarded = true;
+  return host;
 };
 
 export const getDesktopHostApiUrl = (host: DesktopHost): string => {

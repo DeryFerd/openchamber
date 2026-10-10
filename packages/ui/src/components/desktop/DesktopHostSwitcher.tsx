@@ -470,6 +470,9 @@ export function DesktopHostSwitcherDialog({
 
     const origin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(host.url) || '');
     const apiOrigin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(getDesktopHostApiUrl(host)) || '');
+    const sshForwarded = host.sshForwarded === true || (
+      sshStatusesById[host.id]?.phase === 'ready' && sshStatusesById[host.id]?.localUrl === apiOrigin
+    );
     const relayOnly = Boolean(host.relay) && !host.apiUrl && host.id !== LOCAL_HOST_ID;
     if (!origin && !relayOnly) {
       setSwitchingHostId(null);
@@ -501,7 +504,7 @@ export function DesktopHostSwitcherDialog({
         if (cached.via === 'relay' && host.relay) {
           activateRelay(host.relay);
         } else if (apiOrigin) {
-          switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForDesktopHost(host) });
+          switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForDesktopHost(host), sshForwarded });
         } else if (host.relay) {
           activateRelay(host.relay);
         }
@@ -563,7 +566,7 @@ export function DesktopHostSwitcherDialog({
       if (transport === 'relay' && host.relay) {
         activateRelay(host.relay, relayProbeTunnel);
       } else {
-        switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForDesktopHost(host) });
+        switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForDesktopHost(host), sshForwarded });
       }
       onHostSwitched?.();
       return;

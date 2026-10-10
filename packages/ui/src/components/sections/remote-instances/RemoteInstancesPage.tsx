@@ -1310,6 +1310,7 @@ export const RemoteInstancesPage: React.FC = () => {
       clientToken: host.clientToken || null,
       requestHeaders: host.requestHeaders || null,
       runtimeKey: runtimeKeyForDesktopHost(host),
+      sshForwarded: host.sshForwarded === true,
     });
     setSettingsDialogOpen(false);
   }, [setSettingsDialogOpen, t]);
