@@ -550,6 +550,11 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
     if (!script) throw new Error(`Unsupported browser action: ${action}`);
 
     if (action === 'browser.click' || action === 'browser.type') {
+      // Focus goes back to the user when the action ends; without this the
+      // page sees that as a blur and closes the picker the click just opened.
+      await invokeDesktopCommand('desktop_browser_keep_page_focused', {
+        webContentsId: webview.getWebContentsId(),
+      }).catch(() => undefined);
       webview.focus({ preventScroll: true });
     }
     const result = await webview.executeJavaScript(script, true);
