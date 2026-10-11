@@ -1958,6 +1958,8 @@ export const settingsDict = {
   "settings.github.page.toast.ghCliEnabled": "Акаунт gh CLI показано",
   "settings.github.page.toast.ghCliDisabled": "Акаунт gh CLI приховано",
   "settings.github.page.toast.ghCliUpdateFailed": "Не вдалося оновити налаштування gh CLI",
+  "settings.github.page.actions.useCliAccount": "Використати цей обліковий запис",
+  "settings.github.page.toast.ghCliActivated": "Обліковий запис GitHub CLI активовано",
   "settings.notifications.page.delivery.title": "Доставка сповіщень",
   "settings.notifications.page.delivery.enableAria": "Увімкнути сповіщення",
   "settings.notifications.page.delivery.enableLabel": "Увімкнути сповіщення",

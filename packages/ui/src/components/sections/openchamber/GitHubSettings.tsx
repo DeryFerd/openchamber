@@ -194,6 +194,25 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = () => {
     }
   }, [captureRuntime, refreshStatus, sourceControl, t]);
 
+  const activateGhCli = React.useCallback(async (accountId: string) => {
+    const isCurrentRuntime = captureRuntime();
+    setIsBusy(true);
+    try {
+      if (!sourceControl) return;
+      const next = await sourceControl.authActivate(GITHUB_SOURCE_CONTROL_IDENTITY, accountId);
+      if (!isCurrentRuntime()) return;
+      useSourceControlAuthStore.getState().setStatus(GITHUB_SOURCE_CONTROL_IDENTITY, next);
+      toast.success(t('settings.github.page.toast.ghCliActivated'));
+    } catch (error) {
+      if (isCurrentRuntime()) {
+        console.error('Failed to activate gh CLI account:', error);
+        toast.error(t('settings.github.page.toast.ghCliUpdateFailed'));
+      }
+    } finally {
+      if (isCurrentRuntime()) setIsBusy(false);
+    }
+  }, [captureRuntime, sourceControl, t]);
+
   const removeAccount = React.useCallback(async (accountId: string) => {
     const isCurrentRuntime = captureRuntime();
     setIsBusy(true);
@@ -226,6 +245,10 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = () => {
   const refreshError = status?.status === 'unreachable' || status?.status === 'temporarily-unavailable'
     ? status.message || t('sessionAuth.error.networkRetry')
     : null;
+  // The consent design keeps the gh token off every request until the user
+  // switches to it, so the card that owns that switch must also offer it for
+  // a session whose only credential is the CLI login.
+  const canActivateCli = Boolean(ghCli?.available && ghCli.user && !ghCli.active && !ghCli.disabled);
   const showCliFallback = Boolean(ghCli?.available && !ghCli.active && (!ghCli.user || ghCli.disabled));
 
   return (
@@ -259,6 +282,16 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = () => {
             : t('settings.sourceControl.accounts.needsAuthentication')}
           renderActions={(account) => (
             <>
+              {account.source === 'cli' && canActivateCli ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void activateGhCli(account.id)}
+                  disabled={isBusy}
+                >
+                  {t('settings.github.page.actions.useCliAccount')}
+                </Button>
+              ) : null}
               {account.status === 'invalid' ? (
                 <Button size="sm" variant="outline" onClick={startConnect} disabled={isBusy}>
                   {t('settings.sourceControl.actions.reauthenticate')}

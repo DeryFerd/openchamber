@@ -1958,6 +1958,8 @@ export const settingsDict = {
   'settings.github.page.toast.ghCliEnabled': 'gh CLI 계정 표시됨',
   'settings.github.page.toast.ghCliDisabled': 'gh CLI 계정 숨겨짐',
   'settings.github.page.toast.ghCliUpdateFailed': 'gh CLI 설정을 업데이트하지 못했습니다',
+  'settings.github.page.actions.useCliAccount': '이 계정 사용',
+  'settings.github.page.toast.ghCliActivated': 'GitHub CLI 계정이 활성화되었습니다',
   'settings.notifications.page.delivery.title': '알림',
   'settings.notifications.page.delivery.enableAria': '알림 활성화',
   'settings.notifications.page.delivery.enableLabel': '알림 활성화',

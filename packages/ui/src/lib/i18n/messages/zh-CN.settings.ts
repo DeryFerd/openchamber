@@ -1958,6 +1958,8 @@ export const settingsDict = {
   'settings.github.page.toast.ghCliEnabled': '已显示 gh CLI 账户',
   'settings.github.page.toast.ghCliDisabled': '已隐藏 gh CLI 账户',
   'settings.github.page.toast.ghCliUpdateFailed': '更新 gh CLI 设置失败',
+  'settings.github.page.actions.useCliAccount': '使用此账户',
+  'settings.github.page.toast.ghCliActivated': 'GitHub CLI 账户已激活',
   'settings.notifications.page.delivery.title': '通知投递',
   'settings.notifications.page.delivery.enableAria': '启用通知',
   'settings.notifications.page.delivery.enableLabel': '启用通知',

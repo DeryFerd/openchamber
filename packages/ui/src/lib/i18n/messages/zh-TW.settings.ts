@@ -1847,6 +1847,8 @@ export const settingsDict = {
   'settings.github.page.toast.ghCliEnabled': '已顯示 gh CLI 帳戶',
   'settings.github.page.toast.ghCliDisabled': '已隱藏 gh CLI 帳戶',
   'settings.github.page.toast.ghCliUpdateFailed': '更新 gh CLI 設定失敗',
+  'settings.github.page.actions.useCliAccount': '使用此帳號',
+  'settings.github.page.toast.ghCliActivated': 'GitHub CLI 帳戶已啟用',
   'settings.notifications.page.delivery.title': '通知傳遞',
   'settings.notifications.page.delivery.enableAria': '啟用通知',
   'settings.notifications.page.delivery.enableLabel': '啟用通知',

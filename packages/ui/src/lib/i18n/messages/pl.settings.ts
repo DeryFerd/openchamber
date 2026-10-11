@@ -366,6 +366,8 @@ export const settingsDict = {
   'settings.github.page.toast.ghCliEnabled': 'Konto gh CLI widoczne',
   'settings.github.page.toast.ghCliDisabled': 'Konto gh CLI ukryte',
   'settings.github.page.toast.ghCliUpdateFailed': 'Nie udało się zaktualizować ustawienia gh CLI',
+  'settings.github.page.actions.useCliAccount': 'Użyj tego konta',
+  'settings.github.page.toast.ghCliActivated': 'Konto GitHub CLI aktywowane',
   'settings.github.page.ghCli.title': 'Token CLI GitHub',
   'settings.github.page.ghCli.availableDescription': 'Zalogowano przez gh CLI. Nie jest używane, dopóki się na nie nie przełączysz',
   'settings.github.page.ghCli.disabledDescription': 'Zainstalowane i ukryte na liście kont',

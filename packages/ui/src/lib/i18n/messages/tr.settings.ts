@@ -1880,6 +1880,8 @@ export const settingsDict = {
   'settings.github.page.toast.ghCliEnabled': 'gh CLI hesabı gösteriliyor',
   'settings.github.page.toast.ghCliDisabled': 'gh CLI hesabı gizlendi',
   'settings.github.page.toast.ghCliUpdateFailed': 'gh CLI ayarı güncellenemedi',
+  'settings.github.page.actions.useCliAccount': 'Bu hesabı kullan',
+  'settings.github.page.toast.ghCliActivated': 'GitHub CLI hesabı etkinleştirildi',
   'settings.notifications.page.delivery.title': 'Bildirim Teslimi',
   'settings.notifications.page.delivery.enableAria': 'Bildirimleri etkinleştir',
   'settings.notifications.page.delivery.enableLabel': 'Bildirimleri Etkinleştir',

@@ -1991,6 +1991,8 @@ export const settingsDict = {
   'settings.github.page.toast.ghCliEnabled': 'gh CLI アカウントを表示しました',
   'settings.github.page.toast.ghCliDisabled': 'gh CLI アカウントを非表示にしました',
   'settings.github.page.toast.ghCliUpdateFailed': 'gh CLI 設定の更新に失敗しました',
+  'settings.github.page.actions.useCliAccount': 'このアカウントを使用',
+  'settings.github.page.toast.ghCliActivated': 'GitHub CLI アカウントを有効化しました',
   'settings.notifications.page.delivery.title': '通知配信',
   'settings.notifications.page.delivery.enableAria': '通知を有効化',
   'settings.notifications.page.delivery.enableLabel': '通知を有効化',

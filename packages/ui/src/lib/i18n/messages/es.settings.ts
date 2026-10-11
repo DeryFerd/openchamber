@@ -1958,6 +1958,8 @@ export const settingsDict = {
   "settings.github.page.toast.ghCliEnabled": "Cuenta de gh CLI visible",
   "settings.github.page.toast.ghCliDisabled": "Cuenta de gh CLI oculta",
   "settings.github.page.toast.ghCliUpdateFailed": "No se pudo actualizar la configuración de gh CLI",
+  "settings.github.page.actions.useCliAccount": "Usar esta cuenta",
+  "settings.github.page.toast.ghCliActivated": "Cuenta de GitHub CLI activada",
   "settings.notifications.page.delivery.title": "Entrega de notificaciones",
   "settings.notifications.page.delivery.enableAria": "Habilitar notificaciones",
   "settings.notifications.page.delivery.enableLabel": "Habilitar notificaciones",

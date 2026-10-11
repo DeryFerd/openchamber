@@ -1982,6 +1982,8 @@ export const settingsDict = {
   'settings.github.page.toast.ghCliEnabled': 'gh CLI-account wordt getoond',
   'settings.github.page.toast.ghCliDisabled': 'gh CLI-account verborgen',
   'settings.github.page.toast.ghCliUpdateFailed': 'Kan de instelling van de gh CLI niet bijwerken',
+  'settings.github.page.actions.useCliAccount': 'Dit account gebruiken',
+  'settings.github.page.toast.ghCliActivated': 'GitHub CLI-account geactiveerd',
   'settings.notifications.page.delivery.title': 'Aflevering van meldingen',
   'settings.notifications.page.delivery.enableAria': 'Meldingen aanzetten',
   'settings.notifications.page.delivery.enableLabel': 'Meldingen aanzetten',
