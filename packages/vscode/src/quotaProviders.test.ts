@@ -216,6 +216,30 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     assert.equal(result.usage!.windows.credits_balance!.usedPercent, null);
   });
 
+  test('accepts a wrk_ workspace id from the Console sign-in', async () => {
+    const orgID = 'wrk_01JBW7QK3E8V2Y5M9R4T6A8C0D';
+    configureOpenCodeCredentials({ list: async () => [consoleOAuth({ orgID })] });
+    let request: RequestInit | undefined;
+    // SAFETY: the stub answers the same two Console URLs fetch is given here.
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === 'https://opencode.ai/console/api/billing/status') {
+        return mockResponse({ availableMicroCents: '12000000' });
+      }
+      request = init;
+      return mockResponse({
+        product: 'go',
+        access: { meters: {
+          fiveHour: { resetsAt: '2026-08-12T12:00:00.000Z', limitMicroCents: '1000000000', usedMicroCents: '250000000' },
+        } },
+      });
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('opencode-go');
+
+    assert.equal(new Headers(request?.headers).get('x-org-id'), orgID);
+    assert.equal(result.ok, true);
+  });
+
   test('keeps the meters when the billing balance cannot be read', async () => {
     stubFetchReturning(async (url) => (url === 'https://opencode.ai/console/api/billing/status'
       ? mockResponse({}, { ok: false, status: 500 })

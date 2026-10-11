@@ -424,7 +424,9 @@ const toTimestamp = (value: unknown): number | null => {
 // an `opencode-go` service key. Credentials are global and OpenCode marks one
 // active per integration, so this is the selected account and organization.
 const CONSOLE_SERVER = 'https://opencode.ai/console';
-const CONSOLE_ORGANIZATION_ID_PATTERN = /^org_[A-Za-z0-9]+$/;
+// Console workspaces carry a `wrk_` id on current sign-ins; older stored
+// credentials still carry `org_`, so both prefixes count and nothing else.
+const CONSOLE_ORGANIZATION_ID_PATTERN = /^(?:org|wrk)_[A-Za-z0-9]+$/;
 const openCodeGoConsoleCredential = (auth: AuthFile): OpenCodeGoConsoleCredential | null => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['opencode']));
   if (!entry || entry.type !== 'oauth') return null;
