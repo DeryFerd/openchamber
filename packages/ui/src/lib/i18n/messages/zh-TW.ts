@@ -495,6 +495,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.existingSession': '現有會話',
   'sessions.scheduledTasks.editor.targetSession': '目標會話',
   'sessions.scheduledTasks.editor.targetHint': '在訊息佇列中等待會話閒置。使用預設值會保留目標會話的選擇。',
+  'sessions.scheduledTasks.editor.targetLoadFailed': '無法載入此專案的會話。',
+  'sessions.scheduledTasks.editor.targetRetry': '重試',
   'sessions.scheduledTasks.editor.targetRequired': '請選擇目標會話。',
   'sessions.scheduledTasks.editor.taskName.label': '任務名稱',
   'sessions.scheduledTasks.editor.taskName.placeholder': '每日同步',

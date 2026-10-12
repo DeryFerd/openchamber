@@ -476,6 +476,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.editor.existingSession": "Наявна сесія",
   "sessions.scheduledTasks.editor.targetSession": "Цільова сесія",
   "sessions.scheduledTasks.editor.targetHint": "Очікує в черзі повідомлень, доки сесія стане неактивною. Типові налаштування зберігають вибір цільової сесії.",
+  "sessions.scheduledTasks.editor.targetLoadFailed": "Не вдалося завантажити сесії цього проєкту.",
+  "sessions.scheduledTasks.editor.targetRetry": "Спробувати ще раз",
   "sessions.scheduledTasks.editor.targetRequired": "Виберіть цільову сесію.",
   "sessions.scheduledTasks.editor.taskName.label": "Назва завдання",
   "sessions.scheduledTasks.editor.taskName.placeholder": "Щоденна синхронізація",

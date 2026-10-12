@@ -389,6 +389,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.existingSession': 'Mevcut oturum',
   'sessions.scheduledTasks.editor.targetSession': 'Hedef oturum',
   'sessions.scheduledTasks.editor.targetHint': 'Oturum boşta olana kadar ileti kuyruğunda bekler. Varsayılanlar hedef oturumun seçimini korur.',
+  'sessions.scheduledTasks.editor.targetLoadFailed': 'Bu projenin oturumları yüklenemedi.',
+  'sessions.scheduledTasks.editor.targetRetry': 'Tekrar dene',
   'sessions.scheduledTasks.editor.targetRequired': 'Bir hedef oturum seçin.',
   'sessions.scheduledTasks.editor.taskName.label': 'Görev adı',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'Günlük eşitleme',

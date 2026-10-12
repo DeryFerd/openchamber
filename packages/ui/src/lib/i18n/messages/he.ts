@@ -445,6 +445,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.existingSession': 'הפעלה קיימת',
   'sessions.scheduledTasks.editor.targetSession': 'הפעלת יעד',
   'sessions.scheduledTasks.editor.targetHint': 'ממתינה בתור ההודעות עד שההפעלה פנויה. האפשרות „השתמש בברירות מחדל” שומרת את הבחירות של הפעלת היעד.',
+  'sessions.scheduledTasks.editor.targetLoadFailed': 'לא ניתן לטעון את ההפעלות של הפרויקט הזה.',
+  'sessions.scheduledTasks.editor.targetRetry': 'נסה שוב',
   'sessions.scheduledTasks.editor.targetRequired': 'יש לבחור הפעלת יעד.',
   'sessions.scheduledTasks.editor.taskName.label': 'שם המשימה',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'סנכרון יומי',

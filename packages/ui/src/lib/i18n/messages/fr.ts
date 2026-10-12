@@ -292,6 +292,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.existingSession': 'Session existante',
   'sessions.scheduledTasks.editor.targetSession': 'Session cible',
   'sessions.scheduledTasks.editor.targetHint': 'Attend dans la file de messages que la session soit inactive. Les valeurs par défaut conservent la sélection de la session cible.',
+  'sessions.scheduledTasks.editor.targetLoadFailed': 'Impossible de charger les sessions de ce projet.',
+  'sessions.scheduledTasks.editor.targetRetry': 'Réessayer',
   'sessions.scheduledTasks.editor.targetRequired': 'Sélectionnez une session cible.',
   'sessions.scheduledTasks.editor.taskName.label': 'Nom de la tâche',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'Synchronisation quotidienne',

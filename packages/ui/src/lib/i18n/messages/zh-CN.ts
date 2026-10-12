@@ -467,6 +467,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.existingSession': '现有会话',
   'sessions.scheduledTasks.editor.targetSession': '目标会话',
   'sessions.scheduledTasks.editor.targetHint': '在消息队列中等待会话空闲。使用默认值会保留目标会话的选择。',
+  'sessions.scheduledTasks.editor.targetLoadFailed': '无法加载此项目的会话。',
+  'sessions.scheduledTasks.editor.targetRetry': '重试',
   'sessions.scheduledTasks.editor.targetRequired': '请选择目标会话。',
   'sessions.scheduledTasks.editor.taskName.label': '任务名称',
   'sessions.scheduledTasks.editor.taskName.placeholder': '每日同步',

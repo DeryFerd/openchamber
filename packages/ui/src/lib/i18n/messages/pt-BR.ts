@@ -476,6 +476,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.editor.existingSession": "Sessão existente",
   "sessions.scheduledTasks.editor.targetSession": "Sessão de destino",
   "sessions.scheduledTasks.editor.targetHint": "Espera na fila de mensagens até a sessão ficar ociosa. Os padrões mantêm a seleção da sessão de destino.",
+  "sessions.scheduledTasks.editor.targetLoadFailed": "Não foi possível carregar as sessões deste projeto.",
+  "sessions.scheduledTasks.editor.targetRetry": "Tentar novamente",
   "sessions.scheduledTasks.editor.targetRequired": "Selecione uma sessão de destino.",
   "sessions.scheduledTasks.editor.taskName.label": "Nome da tarefa",
   "sessions.scheduledTasks.editor.taskName.placeholder": "Sincronização diária",

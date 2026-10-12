@@ -467,6 +467,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.existingSession': '既存のセッション',
   'sessions.scheduledTasks.editor.targetSession': '対象セッション',
   'sessions.scheduledTasks.editor.targetHint': 'セッションがアイドルになるまでメッセージキューで待機します。デフォルトを使用すると対象セッションの選択を維持します。',
+  'sessions.scheduledTasks.editor.targetLoadFailed': 'このプロジェクトのセッションを読み込めませんでした。',
+  'sessions.scheduledTasks.editor.targetRetry': '再試行',
   'sessions.scheduledTasks.editor.targetRequired': '対象セッションを選択してください。',
   'sessions.scheduledTasks.editor.taskName.label': 'タスク名',
   'sessions.scheduledTasks.editor.taskName.placeholder': '日次同期',

@@ -467,6 +467,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.existingSession': '기존 세션',
   'sessions.scheduledTasks.editor.targetSession': '대상 세션',
   'sessions.scheduledTasks.editor.targetHint': '세션이 유휴 상태가 될 때까지 메시지 대기열에서 기다립니다. 기본값을 사용하면 대상 세션의 선택을 유지합니다.',
+  'sessions.scheduledTasks.editor.targetLoadFailed': '이 프로젝트의 세션을 불러오지 못했습니다.',
+  'sessions.scheduledTasks.editor.targetRetry': '다시 시도',
   'sessions.scheduledTasks.editor.targetRequired': '대상 세션을 선택하세요.',
   'sessions.scheduledTasks.editor.taskName.label': '작업 이름',
   'sessions.scheduledTasks.editor.taskName.placeholder': '매일 동기화',

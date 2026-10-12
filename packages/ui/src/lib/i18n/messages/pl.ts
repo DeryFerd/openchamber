@@ -638,6 +638,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.existingSession': 'Istniejąca sesja',
   'sessions.scheduledTasks.editor.targetSession': 'Sesja docelowa',
   'sessions.scheduledTasks.editor.targetHint': 'Czeka w kolejce wiadomości, aż sesja będzie bezczynna. Wartości domyślne zachowują wybór sesji docelowej.',
+  'sessions.scheduledTasks.editor.targetLoadFailed': 'Nie udało się wczytać sesji tego projektu.',
+  'sessions.scheduledTasks.editor.targetRetry': 'Spróbuj ponownie',
   'sessions.scheduledTasks.editor.targetRequired': 'Wybierz sesję docelową.',
   'sessions.scheduledTasks.editor.taskName.label': 'Nazwa zadania',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'Codzienna synchronizacja',

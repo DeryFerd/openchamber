@@ -419,6 +419,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.existingSession': 'Bestehende Sitzung',
   'sessions.scheduledTasks.editor.targetSession': 'Zielsitzung',
   'sessions.scheduledTasks.editor.targetHint': 'Wartet in der Nachrichtenwarteschlange, bis die Sitzung inaktiv ist. Standardwerte beibehalten übernimmt die Auswahl der Zielsitzung.',
+  'sessions.scheduledTasks.editor.targetLoadFailed': 'Die Sitzungen dieses Projekts konnten nicht geladen werden.',
+  'sessions.scheduledTasks.editor.targetRetry': 'Erneut versuchen',
   'sessions.scheduledTasks.editor.targetRequired': 'Wählen Sie eine Zielsitzung.',
   'sessions.scheduledTasks.editor.taskName.label': 'Aufgabenname',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'Tägliche Synchronisierung',

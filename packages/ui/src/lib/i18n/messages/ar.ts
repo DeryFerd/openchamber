@@ -445,6 +445,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.existingSession': 'جلسة موجودة',
   'sessions.scheduledTasks.editor.targetSession': 'الجلسة المستهدفة',
   'sessions.scheduledTasks.editor.targetHint': 'ينتظر في قائمة انتظار الرسائل حتى تصبح الجلسة خاملة. خيار استخدام الإعدادات الافتراضية يبقي على اختيارات الجلسة المستهدفة.',
+  'sessions.scheduledTasks.editor.targetLoadFailed': 'تعذّر تحميل جلسات هذا المشروع.',
+  'sessions.scheduledTasks.editor.targetRetry': 'حاول مرة أخرى',
   'sessions.scheduledTasks.editor.targetRequired': 'اختر الجلسة المستهدفة.',
   'sessions.scheduledTasks.editor.taskName.label': 'اسم المهمة',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'مزامنة يومية',

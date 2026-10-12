@@ -466,6 +466,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.existingSession': 'Existing session',
   'sessions.scheduledTasks.editor.targetSession': 'Target session',
   'sessions.scheduledTasks.editor.targetHint': 'Waits in the message queue until the session is idle. Use defaults keeps the target session selection.',
+  'sessions.scheduledTasks.editor.targetLoadFailed': 'Couldn\'t load this project\'s sessions.',
+  'sessions.scheduledTasks.editor.targetRetry': 'Try again',
   'sessions.scheduledTasks.editor.targetRequired': 'Select a target session.',
   'sessions.scheduledTasks.editor.taskName.label': 'Task name',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'Daily sync',

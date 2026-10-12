@@ -466,6 +466,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.existingSession': 'Bestaande sessie',
   'sessions.scheduledTasks.editor.targetSession': 'Doelsessie',
   'sessions.scheduledTasks.editor.targetHint': 'Wacht in de berichtenwachtrij tot de sessie niet actief is. Standaardwaarden behouden de selectie van de doelsessie.',
+  'sessions.scheduledTasks.editor.targetLoadFailed': 'Kan de sessies van dit project niet laden.',
+  'sessions.scheduledTasks.editor.targetRetry': 'Opnieuw proberen',
   'sessions.scheduledTasks.editor.targetRequired': 'Selecteer een doelsessie.',
   'sessions.scheduledTasks.editor.taskName.label': 'Taaknaam',
   'sessions.scheduledTasks.editor.taskName.placeholder': 'Dagelijkse synchronisatie',
