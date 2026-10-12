@@ -92,6 +92,8 @@ On the first OpenCode Go usage refresh after upgrading, OpenChamber deletes the 
 
 Codex `credits.balance` is an OpenAI credit count, not a dollar amount. Web/Electron and VS Code expose it as a plain numeric `credits_balance.valueLabel` under the UI's localized Credits Balance title, without a currency symbol or two-decimal money rounding. Numeric strings are accepted; zero, unlimited, and unavailable balances retain their existing handling. Keep `providers/codex.js` and `packages/vscode/src/quotaProviders.ts` in sync. The separate business-account `spend_control.individual_limit` window is unchanged.
 
+A Codex usage 401 whose body has `error.type: "rejected_by_access_enforcement"` means the sign-in may not read usage (OpenCode's `chatgpt-token-sharing` method hits it) while the session itself is valid, so both runtimes report usage as unavailable for the sign-in method. Any other 401 reads as an expired session. Web and VS Code keep this branch identical.
+
 ## Claude credential and limit semantics
 
 Claude quota reports the subscription limits Claude Code itself is bound by, read from `GET https://api.anthropic.com/api/oauth/usage`.
