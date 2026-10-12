@@ -28,7 +28,9 @@ JSON bodies enabled in `opencode/core-routes.js`; stopped by
 the queued send config names `openchamber/auto`, and answers with the real
 model and agent. OpenCode 2.x holds both on the session, so the queue applies
 them with the `POST /api/session/:id/model` and `/agent` calls it already
-makes. The queue captures the sentinel like any other send config.
+makes. The queue captures the sentinel like any other send config. The request
+text it routes on carries the same image attachment fact as a direct send
+(`attachmentHint`).
 
 ## Item
 

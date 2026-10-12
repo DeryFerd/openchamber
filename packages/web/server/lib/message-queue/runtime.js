@@ -16,6 +16,7 @@ import path from 'path';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { attachmentHint } from '../routing/runtime.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
@@ -521,7 +522,7 @@ export function createMessageQueueRuntime({
       directory,
       model,
       agent,
-      requestText: item.text,
+      requestText: `${item.text}${attachmentHint({ files: promptFiles })}`.trim(),
     }) : null;
     if (routed) {
       model = routed.model;

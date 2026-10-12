@@ -320,6 +320,22 @@ describe('auto routing', () => {
     expect(resolveAutoSelection).toHaveBeenCalledTimes(2);
     expect(resolveAutoSelection.mock.calls[0][0]).toMatchObject({ sessionId: SESSION, directory: DIRECTORY, requestText: 'plain' });
   });
+
+  it('tells the classifier about an image attached to a queued send', async () => {
+    const resolveAutoSelection = vi.fn(async () => null);
+    const { runtime, openCode, emit } = createRuntime({ resolveAutoSelection });
+    runtime.start();
+    openCode.state.statuses = { [SESSION]: { type: 'busy' } };
+    const auto = { providerID: 'openchamber', modelID: 'auto', agent: 'build' };
+    const image = { id: 'a', filename: 'shot.png', mimeType: 'image/png', size: 1, source: 'local', dataUrl: 'data:image/png;base64,AAAA' };
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: "what's wrong?", text: "what's wrong?", attachments: [image], sendConfig: auto }));
+
+    openCode.state.statuses = {};
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    expect(resolveAutoSelection.mock.calls[0][0].requestText).toBe("what's wrong?\n\n[The user attached an image: shot.png]");
+  });
 });
 
 describe('parseQueuedItemInput', () => {
