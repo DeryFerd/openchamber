@@ -331,7 +331,7 @@ const startFixtureProvider = (port) => new Promise((resolveServer, reject) => {
 })
 
 /** OpenCode configuration that registers this provider; pass it as `OPENCODE_CONFIG_CONTENT`. */
-const fixtureProviderConfig = (port) => ({
+export const fixtureProviderConfig = (port) => ({
   provider: {
     [FIXTURE_PROVIDER_ID]: {
       npm: "@ai-sdk/openai-compatible",

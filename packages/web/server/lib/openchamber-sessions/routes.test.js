@@ -116,6 +116,14 @@ vi.mock('../git/index.js', () => ({
   createWorktree: (...args) => globalThis.__openchamberCreateWorktreeMock(...args),
   getWorktreeBootstrapStatus: (...args) => globalThis.__openchamberGetWorktreeBootstrapStatusMock(...args),
   resolvePrimaryWorktreeRoot: async (directory) => ({ root: directory === '/repo/worktrees/side-task' ? '/repo/app' : directory }),
+  // Only moving a session into a worktree reaches these; the route tests
+  // inject their own through the service dependencies.
+  removeWorktree: vi.fn(),
+  getBranches: vi.fn(),
+  stashPush: vi.fn(),
+  stashApply: vi.fn(),
+  stashDrop: vi.fn(),
+  listStashes: vi.fn(),
 }));
 
 /**

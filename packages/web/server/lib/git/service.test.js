@@ -759,6 +759,55 @@ describe.runIf(canRunGit())('untracked diffs', () => {
   });
 });
 
+// An external diff configured in git (difftastic via diff.external, or
+// GIT_EXTERNAL_DIFF in the session environment) replaces patch text with its own
+// format. The UI parses patches as unified diffs, so patch-producing calls must
+// always use git's internal diff machinery.
+describe.runIf(canRunGit())('diff output with diff.external configured', () => {
+  // `echo` runs on every platform's shell and its output is never a unified diff.
+  // simple-git's safety plugin refuses to configure diff.external, so the fixture
+  // writes it through runGit like any other local git config.
+  const useFakeExternalDiff = (tmpDir) => runGit(tmpDir, ['config', 'diff.external', 'echo EXTERNAL-DIFF-OUTPUT']);
+
+  it('returns a unified working-tree diff the UI parser can split', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    useFakeExternalDiff(tmpDir);
+    await git.commit('one', { '--allow-empty': null });
+    await writeFile(tmpDir, 'file.txt', ORIGINAL_FILE);
+    await git.add('file.txt');
+    await git.commit('Initial');
+    await writeFile(tmpDir, 'file.txt', EDITED_FILE);
+
+    const diff = await getDiff(tmpDir, { path: 'file.txt' });
+    expect(diff).toContain('diff --git');
+    expect(diff).not.toContain('EXTERNAL-DIFF-OUTPUT');
+    // ORIGINAL_FILE and EDITED_FILE change line 1 and line 20: two hunks. The
+    // point is that the parser sees hunks at all — difftastic-format text splits to zero.
+    expect(splitHunks(diff)).toHaveLength(2);
+  });
+
+  it('keeps untracked-file and range diffs unified', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    useFakeExternalDiff(tmpDir);
+    await git.commit('one', { '--allow-empty': null });
+    await git.raw(['branch', 'base-branch']);
+    await writeFile(tmpDir, 'file.txt', 'changed\n');
+    await git.add('file.txt');
+    await git.commit('two');
+    await git.raw(['branch', 'head-branch']);
+    await writeFile(tmpDir, 'new.txt', 'untracked\n');
+
+    const [untracked] = await getUntrackedDiffs(tmpDir, ['new.txt']);
+    expect(untracked).toContain('@@');
+    expect(untracked).not.toContain('EXTERNAL-DIFF-OUTPUT');
+
+    const range = await getRangeDiff(tmpDir, { base: 'base-branch', head: 'head-branch' });
+    expect(range).toContain('diff --git');
+    expect(range).toContain('@@');
+    expect(range).not.toContain('EXTERNAL-DIFF-OUTPUT');
+  });
+});
+
 describe('symlink diffs', () => {
   it('treats an untracked directory symlink as a link in patch and split diffs', async () => {
     if (!canRunGit() || process.platform === 'win32') return;
@@ -2113,20 +2162,21 @@ describe('createWorktree', () => {
     }
   }, 30_000);
 
-  describe('from a local base branch', () => {
-    const withDataHome = async (run) => {
-      const previousXdgDataHome = process.env.XDG_DATA_HOME;
-      process.env.XDG_DATA_HOME = createTempDir();
-      try {
-        await run();
-      } finally {
-        if (previousXdgDataHome === undefined) {
-          delete process.env.XDG_DATA_HOME;
-        } else {
-          process.env.XDG_DATA_HOME = previousXdgDataHome;
-        }
+  const withDataHome = async (run) => {
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+    try {
+      await run();
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
       }
-    };
+    }
+  };
+
+  describe('from a local base branch', () => {
 
     // The repository sits on `next` with a local `main` tracking origin/main;
     // a teammate then pushes one commit to main that was never pulled.
@@ -2204,6 +2254,71 @@ describe('createWorktree', () => {
       });
     }, 30_000);
   });
+
+  // A collaborator pushes straight to the remote; the repository never
+  // fetches, so the branch list offers `remotes/origin/collab` with no local ref.
+  const pushCollaboratorBranch = (remote) => {
+    const collaborator = createTempDir();
+    runGit(collaborator, ['clone', remote, '.']);
+    runGit(collaborator, ['config', 'user.email', 'test@example.com']);
+    runGit(collaborator, ['config', 'user.name', 'Test']);
+    runGit(collaborator, ['checkout', '-b', 'collab']);
+    fs.writeFileSync(path.join(collaborator, 'collab.txt'), 'collab\n');
+    runGit(collaborator, ['add', 'collab.txt']);
+    runGit(collaborator, ['commit', '-m', 'collab']);
+    runGit(collaborator, ['push', 'origin', 'collab']);
+    return runGit(collaborator, ['rev-parse', 'HEAD']).trim();
+  };
+
+  it('fetches a never-fetched remote branch for an existing-branch worktree', async () => {
+    if (!canRunGit()) return;
+    await withDataHome(async () => {
+      const { repository, remote } = createRepositoryWithRemote();
+      const collabHead = pushCollaboratorBranch(remote);
+      const input = { mode: 'existing', existingBranch: 'remotes/origin/collab', worktreeName: 'collab-wt' };
+
+      const validation = await validateWorktreeCreate(repository, input);
+      expect(validation.errors).toEqual([]);
+
+      const created = await createWorktree(repository, input);
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(collabHead);
+      expect(runGit(created.path, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('collab');
+    });
+  }, 30_000);
+
+  it('fetches a never-fetched remote start ref for a new-branch worktree', async () => {
+    if (!canRunGit()) return;
+    await withDataHome(async () => {
+      const { repository, remote } = createRepositoryWithRemote();
+      const collabHead = pushCollaboratorBranch(remote);
+      const input = {
+        mode: 'new',
+        branchName: 'openchamber/from-collab',
+        worktreeName: 'from-collab',
+        startRef: 'remotes/origin/collab',
+      };
+
+      const validation = await validateWorktreeCreate(repository, input);
+      expect(validation.errors).toEqual([]);
+
+      const created = await createWorktree(repository, input);
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(collabHead);
+    });
+  }, 30_000);
+
+  it('reports a remote branch that cannot be fetched as not found', async () => {
+    if (!canRunGit()) return;
+    await withDataHome(async () => {
+      const { repository } = createRepositoryWithRemote();
+      const validation = await validateWorktreeCreate(repository, {
+        mode: 'existing',
+        existingBranch: 'remotes/origin/never-pushed',
+        worktreeName: 'never-pushed-wt',
+      });
+      expect(validation.ok).toBe(false);
+      expect(validation.errors.some((error) => /Remote branch not found/.test(error.message))).toBe(true);
+    });
+  }, 30_000);
 
   it('rejects creation from a remote start ref that was never fetched and cannot be fetched', async () => {
     if (!canRunGit()) return;

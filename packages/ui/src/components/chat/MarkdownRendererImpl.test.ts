@@ -307,9 +307,6 @@ mock.module('./markdown/decorate', () => ({
             `${ctx.labels.copy}|${ctx.codeBlockLineWrap}|${ctx.renderMermaid('test').svg ?? ''}`,
         );
     },
-    getMarkdownCodeText: () => '',
-    layoutReservedCodeLines: () => undefined,
-    RESERVED_CODE_GUTTER_SELECTOR: 'pre[data-md-gutter-reserved]',
     stabilizeMarkdownTableWidths: () => undefined,
 }));
 mock.module('./markdown/textPosition', () => ({ findTextPosition: () => null }));

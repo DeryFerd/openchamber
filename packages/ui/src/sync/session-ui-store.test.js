@@ -7,6 +7,7 @@ import { useSessionWorktreeStore } from './session-worktree-store';
 import { expandSlashCommandGoalObjective, routeMessage, useSessionUIStore } from './session-ui-store';
 import { setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
+import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -600,6 +601,26 @@ describe('openNewSessionDraft project binding', () => {
     expect(draft.selectedProjectId).toBeNull();
     expect(draft.target).toBe('chat');
     expect(draft.directoryOverride).toBeNull();
+  });
+
+  test('a deleted space\'s archive directory, current or forwarded as the override, opens a Chat draft, never a draft rooted in the archive', () => {
+    const archiveDirectory = '/home/me/.config/openchamber/spaces/archive/a1b2c3d4e5f6';
+    useSpaceArchivesStore.setState({ byDirectory: new Map([[archiveDirectory, { spaceId: 'a1b2c3d4e5f6', name: 'gone', projectDirectory: projectA.path, directory: archiveDirectory, archivedAt: 1 }]]) });
+    try {
+      // The "new chat" shortcut and the desktop menu forward the current directory, the archive's after its chat was open.
+      useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: archiveDirectory });
+      let draft = useSessionUIStore.getState().newSessionDraft;
+      expect(draft.target).toBe('chat');
+      expect(draft.directoryOverride).toBeNull();
+
+      useDirectoryStore.getState().setDirectory(archiveDirectory, { showOverlay: false });
+      useSessionUIStore.getState().openNewSessionDraft();
+      draft = useSessionUIStore.getState().newSessionDraft;
+      expect(draft.target).toBe('chat');
+      expect(draft.directoryOverride).toBeNull();
+    } finally {
+      useSpaceArchivesStore.setState({ byDirectory: null });
+    }
   });
 
   test('respects an explicit Chat target over a recorded project target', () => {

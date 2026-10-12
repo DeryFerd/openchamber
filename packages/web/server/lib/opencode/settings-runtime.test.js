@@ -9,6 +9,7 @@ import { createSettingsRuntime } from './settings-runtime.js';
 const createRuntime = async ({
   mergePersistedSettings = (_current, changes) => changes,
   onManagedPluginSettingsChanged = undefined,
+  chatRoots = undefined,
 } = {}) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
   const settingsFilePath = path.join(tempRoot, 'settings.json');
@@ -29,6 +30,7 @@ const createRuntime = async ({
     normalizeManagedRemoteTunnelPresetTokens: (value) => value,
     syncManagedRemoteTunnelConfigWithPresets: async () => {},
     upsertManagedRemoteTunnelToken: async () => {},
+    chatRoots,
     onManagedPluginSettingsChanged,
   });
 
@@ -100,6 +102,27 @@ describe('settings runtime', () => {
     }
   });
 
+  it('never turns a chat folder stored as the last directory into a project', async () => {
+    const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-chats-'));
+    const chatsRoot = path.join(tempRoot, 'chats');
+    const { runtime, cleanup } = await createRuntime({ chatRoots: [chatsRoot] });
+    try {
+      const chat = path.join(chatsRoot, '2026-10-12', 'session-a');
+      await fsPromises.mkdir(chat, { recursive: true });
+      await runtime.writeSettingsToDisk({ projects: [], lastDirectory: chat });
+      expect((await runtime.readSettingsFromDiskMigrated()).projects).toEqual([]);
+
+      // The same folder reached through a link to the chats root.
+      const alias = path.join(tempRoot, 'chats-alias');
+      await fsPromises.symlink(chatsRoot, alias, 'junction');
+      await runtime.writeSettingsToDisk({ projects: [], lastDirectory: path.join(alias, '2026-10-12', 'session-a') });
+      expect((await runtime.readSettingsFromDiskMigrated()).projects).toEqual([]);
+    } finally {
+      await cleanup();
+      await fsPromises.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('uses OpenChamber themes when a new install has no theme preferences', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {
@@ -135,7 +158,7 @@ describe('settings runtime', () => {
       sidebarProjectDisplayMode: 'single',
       sidebarViewMode: 'timeline',
       sidebarProjectSortOrder: 'date-added',
-      sidebarShowRecentSection: false,
+      sidebarShowChatsSection: false,
     };
     try {
       await runtime.persistSettings(preferences);
@@ -571,12 +594,12 @@ describe('settings runtime: per-surface profile keys', () => {
   it('a per-surface key set only from one surface has no base and stays absent elsewhere', async () => {
     const { runtime, tempRoot, cleanup } = await createMergingRuntime();
     try {
-      await runtime.persistSettings({ stickyUserHeader: false }, { surface: 'mobile' });
+      await runtime.persistSettings({ promptNavigatorEnabled: false }, { surface: 'mobile' });
       const stored = await readJson(path.join(tempRoot, 'preferences.json'));
-      expect(stored.fields.stickyUserHeader).not.toHaveProperty('value');
-      expect(stored.fields.stickyUserHeader.surfaces.mobile.value).toBe(false);
-      expect((await runtime.readSettingsFromDisk({ surface: 'desktop' })).stickyUserHeader).toBeUndefined();
-      expect((await runtime.readSettingsFromDisk({ surface: 'mobile' })).stickyUserHeader).toBe(false);
+      expect(stored.fields.promptNavigatorEnabled).not.toHaveProperty('value');
+      expect(stored.fields.promptNavigatorEnabled.surfaces.mobile.value).toBe(false);
+      expect((await runtime.readSettingsFromDisk({ surface: 'desktop' })).promptNavigatorEnabled).toBeUndefined();
+      expect((await runtime.readSettingsFromDisk({ surface: 'mobile' })).promptNavigatorEnabled).toBe(false);
     } finally {
       await cleanup();
     }

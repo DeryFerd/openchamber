@@ -84,12 +84,22 @@ itself; it can only ask and wait.
   pane. `browser.capture` never opens the panel or switches its tab: a hidden
   pane is drawn at zero opacity inside the window for the screenshot, because
   Chromium composites a transparent webview but not a hidden or clipped one.
+  A hidden page also gets no animation frames, so `browser.scroll` waits for
+  two frames at most 100 ms (`pageActions.ts`) and then answers anyway.
   Agent work never takes keyboard focus from the user
   (`useWebviewFocusGuard` beside `BrowserPane`): a page may take focus only
   while the user can see it and no agent action is driving it, otherwise focus
-  goes straight back to where it was. `browser.click` and `browser.type` focus
-  the page on purpose, so it can use the clipboard, and return focus when they
-  finish.
+  goes straight back to where it was. Before `browser.click` and
+  `browser.type` the pane asks the desktop shell
+  (`desktop_browser_keep_page_focused`) to emulate focus for that page: the
+  page then behaves as focused, so pickers stay open and its clipboard calls
+  work, while keyboard focus never leaves the user. The emulation stays for
+  the page's lifetime. When it is unavailable, because DevTools holds the
+  page's debugger, the action gives the page real focus for the script alone
+  (`holdPageFocus`) and returns it before waiting out any load the action
+  started. `browser.click` replays a mouse click at the element's center
+  (pointer and mouse down, focus, up, click), since many widgets open on
+  mousedown or focus and ignore the click event alone.
   `tabId` is validated and passed through by
   `../openchamber-control/service.js` for every action, so an extension
   provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).

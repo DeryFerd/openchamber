@@ -12,8 +12,8 @@ describe('turnProjectionCache', () => {
   test('keeps the cache key stable for unchanged message and part references', () => {
     const messages = [createEntry('hello')];
 
-    const first = buildProjectionCacheKey('session_1', messages, false, false, 'merge');
-    const second = buildProjectionCacheKey('session_1', messages, false, false, 'merge');
+    const first = buildProjectionCacheKey('session_1', messages, false, 'merge');
+    const second = buildProjectionCacheKey('session_1', messages, false, 'merge');
 
     expect(second).toBe(first);
   });
@@ -27,8 +27,8 @@ describe('turnProjectionCache', () => {
       },
     ];
 
-    const beforeKey = buildProjectionCacheKey('session_1', before, false, false, 'merge');
-    const afterKey = buildProjectionCacheKey('session_1', after, false, false, 'merge');
+    const beforeKey = buildProjectionCacheKey('session_1', before, false, 'merge');
+    const afterKey = buildProjectionCacheKey('session_1', after, false, 'merge');
 
     expect(afterKey).not.toBe(beforeKey);
   });
@@ -62,7 +62,7 @@ describe('turnProjectionCache key cost', () => {
       ),
     }));
 
-    buildProjectionCacheKey('session_1', messages, false, false, 'merge');
+    buildProjectionCacheKey('session_1', messages, false, 'merge');
 
     // The previous key read every part of every message: 9000 reads here.
     expect(counter.reads).toBe(0);
@@ -73,22 +73,22 @@ describe('turnProjectionCache key cost', () => {
     const before = [entry];
     const after = [{ info: entry.info, parts: [...entry.parts, textPart('prt_2', 'msg_1')] }];
 
-    expect(buildProjectionCacheKey('session_1', after, false, false, 'merge'))
-      .not.toBe(buildProjectionCacheKey('session_1', before, false, false, 'merge'));
+    expect(buildProjectionCacheKey('session_1', after, false, 'merge'))
+      .not.toBe(buildProjectionCacheKey('session_1', before, false, 'merge'));
   });
 
   test('keeps the key when a rebuilt messages array holds the same records', () => {
     const messages = [createEntry('a'), createEntry('b')];
 
-    expect(buildProjectionCacheKey('session_1', [...messages], false, false, 'merge'))
-      .toBe(buildProjectionCacheKey('session_1', messages, false, false, 'merge'));
+    expect(buildProjectionCacheKey('session_1', [...messages], false, 'merge'))
+      .toBe(buildProjectionCacheKey('session_1', messages, false, 'merge'));
   });
 
   test('changes the key when a message info record is replaced', () => {
     const entry = createEntry('a');
     const replaced = { info: { ...entry.info }, parts: entry.parts };
 
-    expect(buildProjectionCacheKey('session_1', [replaced], false, false, 'merge'))
-      .not.toBe(buildProjectionCacheKey('session_1', [entry], false, false, 'merge'));
+    expect(buildProjectionCacheKey('session_1', [replaced], false, 'merge'))
+      .not.toBe(buildProjectionCacheKey('session_1', [entry], false, 'merge'));
   });
 });

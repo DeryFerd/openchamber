@@ -9,7 +9,7 @@ import {
   type DesktopHost,
   type HostProbeResult,
 } from '@/lib/desktopHosts';
-import { LOCAL_HOST_ID, buildLocalDesktopHost } from '@/lib/desktopCurrentHost';
+import { LOCAL_HOST_ID, withLocalDesktopHost } from '@/lib/desktopCurrentHost';
 
 export type DesktopHostStatus = {
   status: HostProbeResult['status'];
@@ -201,5 +201,5 @@ export const warmDesktopHostStatuses = async (): Promise<void> => {
   const config = await desktopHostsGet().catch(() => null);
   if (!config) return;
   pruneDesktopHostStatuses(config.hosts.map((host) => host.id));
-  await probeDesktopHosts([buildLocalDesktopHost(config.localOrigin), ...config.hosts]);
+  await probeDesktopHosts(withLocalDesktopHost(config.hosts, config.localOrigin));
 };

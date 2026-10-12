@@ -10,6 +10,7 @@ import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
+import { prepareUserMessageResume } from '@/sync/user-message-resume';
 import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type SyntheticContextPart } from '@/sync/input-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
@@ -19,7 +20,7 @@ import {
     ACCEPTED_ATTACHMENT_EXTENSIONS,
     ATTACHMENT_ACCEPT,
     getUnsupportedAttachmentInputs,
-    isDocumentAttachmentFilename,
+    isReadOnSendMentionFilename,
     type AttachmentInputModality,
 } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -141,7 +142,6 @@ import {
     type LargeTextPasteCandidate,
 } from './composer/largeTextPaste';
 import {
-    LARGE_TEXT_PASTE_TOAST_CLASSNAME,
     beginLargeTextPasteOffer,
     resolveLargeTextPasteOffer,
 } from './composer/largeTextPasteOffer';
@@ -219,6 +219,7 @@ import { ComposerAutocompletePopups } from './composer/ui/ComposerAutocompletePo
 import { ComposerFooter } from './composer/ui/ComposerFooter';
 import { MobilePillComposer } from './composer/ui/MobilePillComposer';
 import { ComposerContextChips } from './composer/ui/ComposerContextChips';
+import { LargeTextPasteChoice, type LargeTextPasteChoiceAction } from './composer/ui/LargeTextPasteChoice';
 import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { RevertedMessagesStrip } from './RevertedMessagesStrip';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
@@ -374,6 +375,27 @@ const resolveChatDraftIdentity = (column: ChatColumnSession | null): ChatDraftId
     return createChatDraftIdentity(getRuntimeKey(), directory, sessionId);
 };
 
+type AttachmentPickerInputProps = {
+    ref: React.Ref<HTMLInputElement>;
+    onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+};
+
+// Memoized because React re-applies an input's `name` and `type` on every
+// commit that reaches it (it clears `name` while setting `type`), and the
+// composer renders on streamed updates while these props never change.
+const AttachmentPickerInput = React.memo(function AttachmentPickerInput({ ref, onChange }: AttachmentPickerInputProps) {
+    return (
+        <input
+            ref={ref}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={onChange}
+            accept={ATTACHMENT_ACCEPT}
+        />
+    );
+});
+
 const ChatInputComponent: React.FC<ChatInputProps> = ({
     onOpenSettings,
     scrollToBottom,
@@ -444,7 +466,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const dictationSendInFlightRef = React.useRef(false);
     const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
     const pendingPastedAttachmentFilenamesRef = React.useRef<Set<string>>(new Set());
-    const largeTextPasteToastIdRef = React.useRef<string | number | null>(null);
+    // The unanswered large-paste choice; `resolve` applies the answer once.
+    const [largeTextPasteOffer, setLargeTextPasteOffer] = React.useState<{
+        id: number;
+        resolve: (action: LargeTextPasteChoiceAction, explicitlyChosen: boolean, typedText?: string) => void;
+    } | null>(null);
     const largeTextPasteOfferIdRef = React.useRef(0);
     const [largeTextPasteGesture] = React.useState(() => new LargeTextPasteGesture());
 
@@ -644,6 +670,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     React.useLayoutEffect(() => {
         largeTextPasteScopeRef.current = largeTextPasteScope;
         largeTextPasteGesture.invalidate();
+        // An unanswered choice belongs to the draft it was pasted into; it
+        // must not land in another one. The text is still on the clipboard.
+        largeTextPasteOfferIdRef.current += 1;
+        setLargeTextPasteOffer(null);
         return () => largeTextPasteGesture.invalidate();
     }, [largeTextPasteGesture, largeTextPasteScope]);
     React.useEffect(() => subscribeRuntimeEndpointWillChange(() => largeTextPasteGesture.invalidate()), [largeTextPasteGesture]);
@@ -934,7 +964,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const extractInlineFileMentions = React.useCallback((
         rawText: string,
-        preparedDocumentMentions?: ReadonlyMap<string, AttachedFile[]>,
+        preparedMentions?: ReadonlyMap<string, AttachedFile[]>,
     ) => {
         if (!rawText || !rawText.includes('@')) {
             return { sanitizedText: rawText, attachments: [] };
@@ -948,7 +978,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (!mention || seenPaths.has(mention.serverPath)) continue;
             seenPaths.add(mention.serverPath);
 
-            const prepared = preparedDocumentMentions?.get(mention.serverPath);
+            const prepared = preparedMentions?.get(mention.serverPath);
             if (prepared) {
                 attachments.push(...prepared);
                 continue;
@@ -971,28 +1001,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         };
     }, [resolveInlineFileMention]);
 
-    type DocumentMentionPreparation =
+    type ReadOnSendMentionPreparation =
         | { status: 'ready'; prepared: Map<string, AttachedFile[]> }
         | { status: 'failed'; filename: string }
         | { status: 'runtime-changed' };
 
     /**
-     * Document mentions (`@notes.pdf`) are sent as converted attachments. Their
+     * Document and image mentions (`@notes.docx`, `@shot.png`) are sent as
+     * converted attachments with their real type, like a picked file. Their
      * sources are fetched up front — by the send, or by queueing, since the
      * server that later delivers a queued message cannot read them.
      */
-    const prepareDocumentMentions = React.useCallback(async (
+    const prepareReadOnSendMentions = React.useCallback(async (
         texts: readonly string[],
         reservedFilenames: Set<string>,
         runtimeKey: string,
-    ): Promise<DocumentMentionPreparation> => {
+    ): Promise<ReadOnSendMentionPreparation> => {
         const prepared = new Map<string, AttachedFile[]>();
         for (const rawText of texts) {
             for (const token of scanMentions(rawText, confirmedMentionsRef.current)) {
                 const mention = resolveInlineFileMention(token.name);
                 if (
                     !mention
-                    || !isDocumentAttachmentFilename(mention.filename)
+                    || !isReadOnSendMentionFilename(mention.filename)
                     || prepared.has(mention.serverPath)
                 ) {
                     continue;
@@ -1344,25 +1375,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const queueRuntimeKey = getRuntimeKey();
         const queueTarget = messageQueueTarget;
         const queueSessionId = currentSessionId;
+        // Queueing is the same user intent as sending, so an archived session
+        // comes back once the queue accepts the message, not at delivery.
+        const resumeAfterQueue = prepareUserMessageResume(queueSessionId, queueRuntimeKey);
         const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
         const composerAttachments = sanitizeAttachmentsForSend(attachedFiles);
 
         // A queued message is resolved now, not at delivery: the server that
         // sends it has no agent list, no confirmed mentions, and no way to read
-        // a document the user named — and the mention must match what was
+        // a file the user named — and the mention must match what was
         // visible when the user typed it.
-        const documentMentions = await prepareDocumentMentions(
+        const readOnSendMentions = await prepareReadOnSendMentions(
             [messageToQueue],
             new Set(composerAttachments.map((attachment) => attachment.filename)),
             queueRuntimeKey,
         );
-        if (documentMentions.status === 'runtime-changed') return;
-        if (documentMentions.status === 'failed') {
-            toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: documentMentions.filename }));
+        if (readOnSendMentions.status === 'runtime-changed') return;
+        if (readOnSendMentions.status === 'failed') {
+            toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: readOnSendMentions.filename }));
             return;
         }
         const { sanitizedText, mention } = parseAgentMentions(messageToQueue, agents);
-        const { attachments: extractedMentionAttachments } = extractInlineFileMentions(sanitizedText, documentMentions.prepared);
+        const { attachments: extractedMentionAttachments } = extractInlineFileMentions(sanitizedText, readOnSendMentions.prepared);
         // #3898: a queued message is delivered later without the composer, so
         // a phantom mention (`@masha.conner`) must be dropped now or the
         // delivery 400s.
@@ -1452,8 +1486,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             setLinkedReferences((current) => withComposerReferences(linked, current));
             return;
         }
+        void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareDocumentMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
@@ -1707,7 +1742,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // "Start", where the group's menu offers it, brings the space back and the user sends again.
         const stoppedSpace = spaceTarget ? stoppedSpaceOfTarget(spaceTarget) : null;
         if (stoppedSpace) {
-            toast.error(t(stoppedSpace.reason === 'gone' ? 'spaces.draft.spaceGone' : 'spaces.draft.spaceStopped'), stoppedSpace.start ? {
+            toast.error(t(stoppedSpace.reason === 'gone' ? 'spaces.draft.spaceGone' : stoppedSpace.reason === 'unreachable' ? 'spaces.draft.spaceUnreachable' : 'spaces.draft.spaceStopped'), stoppedSpace.start ? {
                 action: {
                     label: t('spaces.actions.start'),
                     onClick: () => void runSpaceAction(stoppedSpace.spaceId, 'start'),
@@ -1837,6 +1872,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
 
         let sendMessageOptions: {
+            userInitiated?: boolean;
             target?: NonNullable<typeof capturedTarget>;
             sessionId?: string;
             directory?: string;
@@ -1856,24 +1892,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (capturedDraftSnapshot) sendMessageOptions.draftSnapshot = capturedDraftSnapshot;
         }
         if (delivery && sendMessageOptions) sendMessageOptions.delivery = delivery;
+        sendMessageOptions = { ...sendMessageOptions, userInitiated: true };
 
         // Queued messages resolved their mentions when they were queued; only
-        // the composer's own text can still name a document.
+        // the composer's own text can still name a file to read.
         const reservedFilenames = new Set([
             ...attachedFiles.map((attachment) => attachment.filename),
             ...queuedProjection.flatMap((queued) => queued.attachments?.map((attachment) => attachment.filename) ?? []),
         ]);
-        const documentMentions = await prepareDocumentMentions(
+        const readOnSendMentions = await prepareReadOnSendMentions(
             !isBtwActive && !queuedOnly && inputSnapshot.hasContent ? [inputSnapshot.message] : [],
             reservedFilenames,
             submitRuntimeKey,
         );
-        if (documentMentions.status === 'runtime-changed') return;
-        if (documentMentions.status === 'failed') {
-            toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: documentMentions.filename }));
+        if (readOnSendMentions.status === 'runtime-changed') return;
+        if (readOnSendMentions.status === 'failed') {
+            toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: readOnSendMentions.filename }));
             return;
         }
-        const preparedDocumentMentions = documentMentions.prepared;
+        const preparedMentions = readOnSendMentions.prepared;
 
         // The composer delivers these itself, so they leave the queue now — the
         // queue's own delivery (server-side, or the auto-send hook in VS Code)
@@ -1957,7 +1994,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             },
             extractFileMentions: (text) => {
                 if (isBtwActive) return { text, attachments: [] };
-                const { sanitizedText, attachments } = extractInlineFileMentions(text, preparedDocumentMentions);
+                const { sanitizedText, attachments } = extractInlineFileMentions(text, preparedMentions);
                 return { text: sanitizedText, attachments };
             },
             sanitizeAttachments: sanitizeAttachmentsForSend,
@@ -2499,6 +2536,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         })) {
             e.preventDefault();
 
+            // An empty composer sends nothing from the keyboard. Flushing the
+            // queue is the send button's job; a stray Enter must not push
+            // every queued message into the running turn.
+            if (!hasContent) return;
+
             // Queueing / steering only works when there's an existing busy
             // session (or an active auto-review run).
             const canQueue = !isBtwActive && inputMode === 'normal' && hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
@@ -2971,40 +3013,36 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 return;
             }
 
+            // A newer large paste replaces an unanswered choice.
             const offerId = beginLargeTextPasteOffer(largeTextPasteOfferIdRef.current);
             largeTextPasteOfferIdRef.current = offerId;
 
-            if (largeTextPasteToastIdRef.current !== null) {
-                // Invalidate first so a synchronous onDismiss from dismiss()
-                // cannot apply the superseded paste.
-                toast.dismiss(largeTextPasteToastIdRef.current);
-                largeTextPasteToastIdRef.current = null;
-            }
-
-            const resolveLargePaste = (action: 'attach' | 'inline', explicitlyChosen: boolean) => {
+            const resolveLargePaste = (action: LargeTextPasteChoiceAction, explicitlyChosen: boolean, typedText?: string) => {
                 const resolution = resolveLargeTextPasteOffer(
                     largeTextPasteOfferIdRef.current,
                     offerId,
-                    { isMobile, explicitlyChosen },
+                    { explicitlyChosen },
                 );
                 largeTextPasteOfferIdRef.current = resolution.nextOfferId;
                 if (!resolution.accepted) {
                     return;
                 }
-                largeTextPasteToastIdRef.current = null;
+                setLargeTextPasteOffer(null);
                 if (action === 'attach') {
                     void attachAsFile();
                 } else {
                     pasteInline();
                 }
-                // Keep this in the toast tap's gesture: iOS won't raise the
+                if (typedText) {
+                    insertTextAtSelection(typedText);
+                }
+                // Keep this in the tap's gesture: iOS won't raise the
                 // keyboard when focus is restored after the attachment awaits.
                 if (resolution.restoreFocus) {
                     if (composerRef.current) {
                         composerRef.current.focus({ preventScroll: isCapacitorApp() });
                     } else {
-                        // The toast captures the paste-time shell state, but
-                        // the editor may have collapsed since then. The
+                        // The editor may have collapsed since the paste. The
                         // insertion above appends to its draft; expand mounts
                         // and focuses the editor with the platform's keyboard timing.
                         mobileShell.expand();
@@ -3012,26 +3050,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 }
             };
 
-            largeTextPasteToastIdRef.current = toast.info(
-                t('chat.chatInput.toast.largeTextPaste.title'),
-                {
-                    duration: Infinity,
-                    className: LARGE_TEXT_PASTE_TOAST_CLASSNAME,
-                    action: {
-                        label: t('chat.chatInput.toast.largeTextPaste.attach'),
-                        onClick: () => resolveLargePaste('attach', true),
-                    },
-                    cancel: {
-                        label: t('chat.chatInput.toast.largeTextPaste.inline'),
-                        onClick: () => resolveLargePaste('inline', true),
-                    },
-                    onDismiss: () => {
-                        // Dismissing without a choice keeps the paste — insert inline
-                        // so clipboard content is not lost.
-                        resolveLargePaste('inline', false);
-                    },
-                },
-            );
+            setLargeTextPasteOffer({ id: offerId, resolve: resolveLargePaste });
             return;
         }
 
@@ -3044,7 +3063,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         e.preventDefault();
         await attachFilesWithCitation([...imageFiles, ...otherFiles], pastedText);
-    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, isMobile, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
+    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
 
     // Android commits an image through the IME instead of the page (see nativeImagePaste).
     React.useEffect(() => {
@@ -3810,7 +3829,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     ) : null;
     // Pending context (review comments, quotes, terminal selections) sits in
     // the attachment row like any attachment; its preview opens above the
-    // composer, outside the clipping glass box.
+    // composer, outside the clipping box.
     const contextChips = hasDrafts ? (
         <ComposerContextChips
             draftTarget={inlineDraftTarget}
@@ -4169,13 +4188,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 ) : (
                 <>
                 {/* The autocomplete popups anchor to this wrapper, not to the
-                    glass box: a backdrop-filter ancestor is a backdrop root,
-                    so a glass popup inside the box would only blur the box's
-                    own contents and read as a flat tint over the transcript. */}
+                    box, which clips its contents. */}
                 <div
                     ref={isMobile ? undefined : setContextPreviewHost}
                     className={cn('relative', isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}
                 >
+                    {largeTextPasteOffer ? (
+                        <LargeTextPasteChoice
+                            key={largeTextPasteOffer.id}
+                            takeFocus={!isMobile}
+                            onChoose={(action, explicitlyChosen) => largeTextPasteOffer.resolve(action, explicitlyChosen)}
+                            onTypeThrough={(text) => largeTextPasteOffer.resolve('inline', true, text)}
+                        />
+                    ) : null}
                     <ComposerAutocompletePopups
                         open={openAutocomplete}
                         query={autocompleteQuery}
@@ -4191,10 +4216,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onAgentSelect={handleAgentSelect}
                         onClose={closeAutocomplete}
                     />
-                {/* The lift shadow lives on this wrapper, away from the glass
-                    box's backdrop-filter: on the same element Chromium grows
-                    the glass layer by the shadow's blur, and that band painted
-                    a flat grey strip over the bottom of the goal row above. */}
+                {/* The lift shadow lives on this wrapper, apart from the
+                    box. */}
                 <div
                     className={cn(
                         'flex flex-col',
@@ -4207,9 +4230,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     className={cn(
                         "flex flex-col relative overflow-visible",
                         isComposerExpanded && 'flex-1 min-h-0',
-                        "border border-border/80 focus-within:border-interactive-selection-foreground/35",
-                        // The box floats over the transcript, so it is glass.
-                        'oc-glass-composer',
+                        "border border-border/80",
+                        // Opaque: always on screen over the moving transcript
+                        // (see .oc-surface-floating in design-system.css).
+                        'oc-surface-floating',
                         isDragging && "ring-2 ring-primary ring-offset-2"
                     )}
                     style={{ borderRadius: chatInputRadius }}
@@ -4509,14 +4533,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             variant unmounted, and a variant swap while the OS file picker was
             open detached the clicked input — its change event was silently
             lost and the picked files never attached. */}
-        <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={handleLocalFileSelect}
-            accept={ATTACHMENT_ACCEPT}
-        />
+        <AttachmentPickerInput ref={fileInputRef} onChange={handleLocalFileSelect} />
 
         {/* Mobile attachment sheet: replaces the dropdown (which stole focus and
             dismissed the keyboard) and leaves room for more actions later. */}
@@ -4529,7 +4546,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 <div className="flex flex-col px-3 pb-4 pt-1">
                     <button
                         type="button"
-                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
                         onClick={() => {
                             // The native file/photo picker takes over next — restoring
                             // the keyboard in between would flash it open and shut.
@@ -4543,7 +4560,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     </button>
                     <button
                         type="button"
-                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
                         onClick={() => {
                             // Hand-off to the picker: don't sync-restore the
                             // keyboard under the overlay that opens next frame.
@@ -4558,7 +4575,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     {showLinearPicker ? (
                         <button
                             type="button"
-                            className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                            className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
                             onClick={() => {
                                 mobileShell.skipNextOverlayCloseRestore();
                                 setMobileAttachMenuOpen(false);

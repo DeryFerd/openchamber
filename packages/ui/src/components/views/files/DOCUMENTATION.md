@@ -20,7 +20,11 @@ Outside a repository no entries are ignored, so the hardcoded `node_modules`
 name filter remains as a fallback. Search already follows the same setting.
 
 Desktop `FilesView` in editor-only mode neither loads nor constructs its unused
-tree. Mobile retains its tree. The context panel passes actual visibility,
+tree. In the context panel the panel's tab strip owns the open files: closing
+a file from the editor (Cmd/Ctrl+W in the desktop app, which the window menu
+turns into `openchamber:close-tab` through `lib/closeTabTarget.ts`, or the
+unsaved-changes prompt that may come first) goes through `onCloseFile` to
+`closeContextFile`, which closes that tab exactly as its close button does. Mobile retains its tree. The context panel passes actual visibility,
 including the panel's open state, its active tab, and the editor toggle, to each file surface.
 Hidden surfaces retain drafts, loaded content and scroll state. They stop
 directory and file metadata polling; reopening checks freshness once before
@@ -66,6 +70,15 @@ the meta line height, the icon minimum and vertical padding, so remembered
 offscreen dimensions cannot retain an old font size. Expanded child lists
 sit outside each row's containment, so expansion, scrolling, focus and menus keep
 their existing DOM structure. Reopening still refreshes directory contents.
+
+## Row look
+
+The sidebar tree, `FilesView`'s own tree and the changes tree in `DiffView`
+draw rows from `FileTreeRowParts.tsx`, so the three look the same: flat rows
+indented 12px per level, one faint guide per ancestor level under its
+chevron, a chevron instead of a folder icon, and the git state as a coloured
+letter on the right. A blue dot before the letter marks a file open in a tab;
+it no longer hides the file's git state. Change the look there, not per tree.
 
 ## Refreshing after file changes
 
@@ -238,6 +251,39 @@ a one-line notice whose Install button opens that card. `isExcalidrawFile`
 matches both extensions, and `isMarkdownFile` excludes `.excalidraw.md` so an
 Obsidian drawing never takes the markdown preview path; its source view is the
 markdown document.
+
+## Moving and renaming
+
+Dropping a row of the sidebar tree on a folder moves the entry there
+(`SidebarFilesTree`, drop rules in `components/layout/fileTreeMoveDrag.ts`).
+It is the same native drag that attaches a file to the chat, so the drop
+target decides what happens. A file row stands for the folder it is in and
+the empty space below the tree for the root, as in VS Code. The entry's own
+folder, the entry itself and a folder's own subfolders refuse the drop, and a
+drop within the click slop of where the drag began stays a click (#2368).
+Touch-only devices do not move: the tree scrolls under the finger. A dialog
+asks first unless the user turned it off (`confirmFileTreeMove`, Settings >
+General). The server refuses a name that already exists in the target and the
+tree says so in a toast; nothing is replaced or renamed. VS Code has no file
+tree, so nothing moves there.
+
+A move and both rename dialogs (the sidebar tree and `FilesView`'s own tree)
+go through `moveWorkspacePath`. It renames through the runtime and then
+points the context panel file tabs and `useFilesViewTabsStore` (open, selected
+and expanded paths) at the new path with `moveContextFilePaths`. A file tab's
+id comes from its path, so the tab is rebuilt in place and stays active.
+
+The open editor keeps unsaved edits through a move (`lib/filePathMoves.ts`).
+While the rename request is in flight, `FilesView` refuses saves of paths
+under the source, so autosave cannot recreate the file at its old path. When
+the move commits, the editor notes it before the tabs move; once the selected
+path becomes the new one, it adopts that path instead of re-reading the file,
+which would replace the draft. Editors stay keyed by the path the file was
+opened under, so the text editor, a canvas or a diagram is not remounted and
+keeps its edits and undo history. The draft reset that normally follows a
+change of the selected path is skipped for a moved file, and the open-file
+poll does not report the old path as a deleted file while the move is in
+flight or not yet adopted.
 
 ## Uploads
 

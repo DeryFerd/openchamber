@@ -41,7 +41,7 @@ export const AutoReviewStrip = memo(() => {
   };
 
   return (
-    <div role="status" className="flex h-10 min-w-0 items-center gap-2 border-b border-border/60 pl-3 pr-1.5">
+    <div role="status" className="flex h-10 min-w-0 items-center gap-2 border-b border-border/60 ps-3 pe-1.5">
       <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
         {t('chat.autoReview.title')}

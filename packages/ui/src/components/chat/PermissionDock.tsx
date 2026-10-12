@@ -104,7 +104,7 @@ const PermissionDockRequest: React.FC<{
                     onClick={onToggleCollapsed}
                     aria-expanded={!collapsed}
                     aria-label={collapsed ? t('chat.permissionDock.expandAria') : t('chat.permissionDock.collapseAria')}
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left text-muted-foreground transition-colors hover:text-foreground"
+                    className="flex min-w-0 flex-1 items-center gap-2 text-start text-muted-foreground transition-colors hover:text-foreground"
                 >
                     <Icon name="question" className="size-3.5 shrink-0 text-[var(--status-warning)]" />
                     <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" />

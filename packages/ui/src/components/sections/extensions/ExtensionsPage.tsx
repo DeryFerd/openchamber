@@ -249,7 +249,7 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
     <Collapsible open={open} onOpenChange={setOpen}>
       <div className="overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)]">
         <CollapsibleTrigger
-          className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left hover:bg-[var(--interactive-hover)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--interactive-focus-ring)]"
+          className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-start hover:bg-[var(--interactive-hover)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--interactive-focus-ring)]"
         >
           <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
             <GuestIcon
@@ -378,7 +378,7 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="ml-auto"
+                  className="ms-auto"
                   onClick={() => void openExternalUrl(sourceUrl)}
                 >
                   <Icon name="external-link" className="size-4" />
@@ -814,8 +814,8 @@ export const ExtensionsPage: React.FC = () => {
                   placeholder={t('settings.extensions.add.placeholder')}
                   aria-label={t('settings.extensions.add.label')}
                   className={cn(
-                    'h-8 min-w-0 flex-1 rounded-md pl-3',
-                    nativePaths ? 'pr-14' : 'pr-8',
+                    'h-8 min-w-0 flex-1 rounded-md ps-3',
+                    nativePaths ? 'pe-14' : 'pe-8',
                   )}
                   disabled={busy}
                 />
@@ -828,7 +828,7 @@ export const ExtensionsPage: React.FC = () => {
                   aria-hidden="true"
                   onChange={(event) => void onZipPicked(event)}
                 />
-                <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+                <div className="absolute inset-e-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
                   {nativePaths ? (
                     <Button
                       type="button"

@@ -15,10 +15,12 @@ import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { createTrayController } from './tray.mjs';
+import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
 import { clearAppCache } from './app-cache.mjs';
+import { parseExternalUrl } from './external-url-policy.mjs';
 import {
   BACKGROUND_START_ARG,
   DEEP_LINK_PROTOCOL,
@@ -34,6 +36,7 @@ import {
   installStartupMarkSink,
   isDev,
   isMacMenuBarEnabled,
+  macTrafficLightPosition,
   macosMajorVersion,
   readLoginItemSettings,
   readSettingsRoot,
@@ -90,6 +93,7 @@ import {
   readLinuxAutostartEnabled,
   setLinuxAutostartEnabled,
 } from './linux-autostart.mjs';
+import { reconcileAppImageDesktopEntry } from './linux-desktop-entry.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import {
   browserPanelPermissionAuditDetails,
@@ -1108,6 +1112,9 @@ const resolveBrowserPanelContents = (rawId) => {
   return target;
 };
 
+/** Panel pages the agent has worked in; their debugger session holds focus emulation. */
+const focusEmulatedPanelContents = new WeakSet();
+
 /**
  * The sessions of the browser panel: the user's persistent one, and one per
  * isolated space whose pages are shown. Membership is what the panel commands
@@ -1715,9 +1722,10 @@ const buildInitScript = (localOrigin, bootOutcome, apiBaseUrl = '', clientToken 
   const packagedOrigin = JSON.stringify(packagedUiOrigin());
   const macVersion = macosMajorVersion();
   const outcome = JSON.stringify(bootOutcome ?? null);
+  const sshForwardedApiUrl = JSON.stringify(sshManager.isForwardedApiUrl(apiBaseUrl) ? apiBaseUrl : '');
   return [
     '(function(){',
-    `try{var __oc_local=${local};var __oc_api=${apiBase};var __oc_headers=${headers};var __oc_packaged=${packagedOrigin};var __oc_origin=window.location&&window.location.origin||'';var __oc_is_packaged=__oc_origin===__oc_packaged;var __oc_is_local=__oc_local&&__oc_origin===new URL(__oc_local).origin;window.__OPENCHAMBER_MACOS_MAJOR__=${macVersion};window.__OPENCHAMBER_LOCAL_ORIGIN__=__oc_local;window.__OPENCHAMBER_API_BASE_URL__=__oc_api;if(__oc_is_local||__oc_is_packaged){window.__OPENCHAMBER_HOME__=${home};window.__OPENCHAMBER_RUNTIME_HEADERS__=__oc_headers;}if((__oc_is_local||__oc_is_packaged)&&${token}){window.__OPENCHAMBER_CLIENT_TOKEN__=${token};}var __oc_bo=${outcome};if(__oc_bo){window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__=__oc_bo;}}catch(_e){}`,
+    `try{var __oc_local=${local};var __oc_api=${apiBase};var __oc_headers=${headers};var __oc_packaged=${packagedOrigin};var __oc_origin=window.location&&window.location.origin||'';var __oc_is_packaged=__oc_origin===__oc_packaged;var __oc_is_local=__oc_local&&__oc_origin===new URL(__oc_local).origin;window.__OPENCHAMBER_MACOS_MAJOR__=${macVersion};window.__OPENCHAMBER_LOCAL_ORIGIN__=__oc_local;window.__OPENCHAMBER_API_BASE_URL__=__oc_api;window.__OPENCHAMBER_SSH_FORWARD_API_URL__=${sshForwardedApiUrl};if(__oc_is_local||__oc_is_packaged){window.__OPENCHAMBER_HOME__=${home};window.__OPENCHAMBER_RUNTIME_HEADERS__=__oc_headers;}if((__oc_is_local||__oc_is_packaged)&&${token}){window.__OPENCHAMBER_CLIENT_TOKEN__=${token};}var __oc_bo=${outcome};if(__oc_bo){window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__=__oc_bo;}}catch(_e){}`,
     '}())',
   ].join('');
 };
@@ -2577,7 +2585,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       if (browserWindow.isDestroyed()) return;
       try {
         browserWindow.setWindowButtonVisibility(true);
-        browserWindow.setTrafficLightPosition({ x: 16, y: 17 });
+        browserWindow.setTrafficLightPosition(macTrafficLightPosition());
       } catch {}
     };
     browserWindow.on('minimize', () => {
@@ -2981,6 +2989,9 @@ const findConfiguredHostForUrl = (raw) => {
   } catch {
     return null;
   }
+  // Custom schemes (vscode://, relay://) have the opaque origin "null", which
+  // would match any relay-only host and open it instead of the app link.
+  if (origin === 'null') return null;
   const hosts = readDesktopHostsConfig()?.hosts || [];
   return hosts.find((entry) => [entry?.url, entry?.apiUrl].some((candidate) => {
     if (typeof candidate !== 'string' || !candidate) return false;
@@ -3128,7 +3139,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     frame: usesFramelessChrome() ? false : undefined,
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' || usesFramelessChrome() ? 'hidden' : 'default',
-    trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
+    trafficLightPosition: process.platform === 'darwin' ? macTrafficLightPosition() : undefined,
     webPreferences: {
       additionalArguments: buildRendererAdditionalArguments({
         localOrigin: desktopLocalOrigin,
@@ -3172,7 +3183,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
       if (browserWindow.isDestroyed()) return;
       try {
         browserWindow.setWindowButtonVisibility(true);
-        browserWindow.setTrafficLightPosition({ x: 16, y: 17 });
+        browserWindow.setTrafficLightPosition(macTrafficLightPosition());
       } catch {}
     };
     browserWindow.on('show', refreshTrafficLights);
@@ -4510,11 +4521,41 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         ? { features: [] }
         : { features: [{ name: 'prefers-color-scheme', value: scheme }] });
 
-      if (scheme === 'system') {
+      if (scheme === 'system' && !focusEmulatedPanelContents.has(target)) {
         // Nothing left to emulate; give the session back so DevTools can attach.
         try { target.debugger.detach(); } catch { /* already gone */ }
       }
       return { scheme };
+    }
+
+    /**
+     * Keeps a page the agent works in believing it has focus.
+     *
+     * Keyboard focus stays with the user while the agent clicks and types, and
+     * a page that sees itself blurred closes what the click opened (custom
+     * selects shut on blur) and is refused the clipboard. With focus emulated
+     * the page keeps its own focus while the user's keystrokes still go to the
+     * app; the pane gives the page real focus only when this fails. Sent before every
+     * focusing action, so a page that navigated since gets it again; emulation
+     * lives in the debugger session, which therefore stays attached.
+     */
+    case 'desktop_browser_keep_page_focused': {
+      const target = resolveBrowserPanelContents(args.webContentsId);
+      if (!target.debugger.isAttached()) {
+        try {
+          target.debugger.attach('1.3');
+        } catch {
+          // DevTools holds the session; the page then behaves as it always did.
+          return { focused: false };
+        }
+      }
+      await target.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+      if (!focusEmulatedPanelContents.has(target)) {
+        focusEmulatedPanelContents.add(target);
+        // DevTools taking the session ends the emulation with it.
+        target.debugger.once('detach', () => focusEmulatedPanelContents.delete(target));
+      }
+      return { focused: true };
     }
 
     /**
@@ -4720,13 +4761,12 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         }
       }
       // Dock badge: count of chats with unseen activity (0 = cleared, also when
-      // the user disabled the badge). setBadgeCount drives the macOS dock badge.
+      // the user disabled the badge). A dev copy on a numbered branch shows
+      // that number instead (dev-dock-identity.mjs).
       try {
         const rawCount = args && typeof args.dockBadgeCount === 'number' ? args.dockBadgeCount : 0;
         const badgeCount = Number.isFinite(rawCount) ? Math.max(0, Math.floor(rawCount)) : 0;
-        if (typeof app.setBadgeCount === 'function') {
-          app.setBadgeCount(badgeCount);
-        }
+        applyDockBadge(app, badgeCount);
       } catch (error) {
         log.warn('[electron] dock badge update failed', error);
       }
@@ -4759,10 +4799,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const target = typeof args.url === 'string' ? args.url.trim() : '';
       if (!target) throw new Error('URL is required');
 
-      const parsed = new URL(target);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        throw new Error('Only HTTP URLs can be opened externally');
-      }
+      const parsed = parseExternalUrl(target);
 
       // A saved instance opens in the app, like the window.open path above.
       const host = findConfiguredHostForUrl(parsed.toString());
@@ -4936,11 +4973,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { apps: cachedApps, hasCache, isCacheStale };
     }
 
-    case 'desktop_hosts_get':
+    case 'desktop_hosts_get': {
+      const config = readDesktopHostsConfig();
       return {
-        ...readDesktopHostsConfig(),
+        ...config,
+        hosts: config.hosts.map((host) => sshManager.isForwardedApiUrl(host.apiUrl || host.url, host.id)
+          ? { ...host, sshForwarded: true }
+          : host),
         localOrigin: state.localOrigin || state.sidecarUrl || null,
       };
+    }
 
     case 'desktop_hosts_set': {
       const nextConfigInput = args.input || args.config || {};
@@ -4963,6 +5005,21 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_local_client_token_get':
       return readDesktopLocalClientToken();
+
+    // A page that another instance served cannot switch to Local in place. The
+    // local server answers only this app's own origins, and the local token
+    // stays with local pages. For such a page the main window loads the Local
+    // UI, the same way openchamber://host/local does. The app's own pages get
+    // false and switch in place.
+    case 'desktop_switch_to_local': {
+      if (!browserWindow || browserWindow.id !== state.mainWindow?.id) return false;
+      if (!state.sidecarUrl || isLocalSender(browserWindow.webContents)) return false;
+      // Not awaited, because the navigation replaces the page that waits for this answer.
+      void switchToHostById(LOCAL_HOST_ID).catch((error) => {
+        log.warn('[electron] failed to switch the main window to Local:', error);
+      });
+      return true;
+    }
 
     case 'desktop_install_id_get':
       return getOrCreateDesktopInstallId();
@@ -5713,6 +5770,7 @@ const isLocalSender = (webContents) => {
 const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_hosts_get',
   'desktop_host_probe',
+  'desktop_switch_to_local',
   'desktop_new_window',
   'desktop_new_window_at_url',
   'desktop_new_window_for_host',
@@ -6145,6 +6203,7 @@ app.whenReady().then(async () => {
 
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu());
+    void applyDevDockIdentity({ app, electronDir: __dirname, log });
   } else {
     Menu.setApplicationMenu(buildAutoHiddenMenu());
   }
@@ -6174,6 +6233,9 @@ app.whenReady().then(async () => {
     } catch (error) {
       log.warn('[electron] failed to reconcile Linux autostart entry', error);
     }
+    void reconcileAppImageDesktopEntry()
+      .then((result) => log.info('[electron] AppImage launcher entry', result))
+      .catch((error) => log.warn('[electron] failed to reconcile AppImage launcher entry', error));
   }
 
   if (isBackgroundStart) {

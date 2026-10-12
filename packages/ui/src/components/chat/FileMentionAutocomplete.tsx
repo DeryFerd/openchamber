@@ -509,7 +509,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   return (
       <div
         ref={containerRef}
-        className="absolute z-[100] min-w-0 w-full max-w-[640px] max-h-64 oc-glass-popover border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
+        className="absolute z-[100] min-w-0 w-full max-w-[640px] max-h-64 oc-glass-popover border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 inset-s-0 flex flex-col"
         style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
       >
         <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0">
@@ -570,6 +570,8 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                   {getFileIcon(file)}
                   <span
                     ref={(el) => { labelRefs.current[rowIndex] = el; }}
+                    // Paths read left to right in every language; the marquee and its fade assume it.
+                    dir="ltr"
                     className="relative flex-1 min-w-0 overflow-hidden file-mention-marquee-container"
                     style={isSelected ? {
                       ['--file-mention-marquee-width' as string]: `${marqueeWidth}px`,
@@ -623,6 +625,8 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                     : getFileIcon(file)}
                   <span
                     ref={(el) => { labelRefs.current[rowIndex] = el; }}
+                    // Paths read left to right in every language; the marquee and its fade assume it.
+                    dir="ltr"
                     className="relative flex-1 min-w-0 overflow-hidden file-mention-marquee-container"
                     style={isSelected ? {
                       ['--file-mention-marquee-width' as string]: `${marqueeWidth}px`,

@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
-import { useAllLiveSessions } from '@/sync/sync-context';
+import { useLiveSessionsExcluding } from '@/sync/sync-context';
 import {
   EMPTY_SESSION_ORDER_RANKS,
   orderSessionsByLifecycleScopes,
@@ -8,9 +8,7 @@ import {
 } from '@/sync/session-ordering';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
-import { deriveRecentSessions } from '../recent/activitySections';
 import { normalizePath } from '../utils';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isBtwSession } from '@/lib/sessionBtwMetadata';
@@ -55,7 +53,6 @@ export const partitionSidebarSessions = (
   return { projectSessions, chatSessions };
 };
 
-const EMPTY_ACTIVE_SESSION_IDS: ReadonlySet<string> = new Set();
 
 const isKnownActiveSessionDirectory = (
   session: Session,
@@ -110,25 +107,6 @@ const mergeSidebarSessionSources = (
     sessions.push(session);
   }
   return sessions;
-};
-
-const EMPTY_LIVE_GAP_SESSIONS: Session[] = [];
-
-/**
- * The live sessions the global cache does not hold yet: the only ones the
- * sidebar structure takes from the live list. A live session the global cache
- * already holds is dropped by the merge, so its live changes (a `time.updated`
- * bump on every streamed step) must not rebuild the structure. Returns
- * `previous` while the gap holds the same session objects.
- */
-export const selectLiveGapSessions = (
-  liveSessions: readonly Session[],
-  globalSessionIds: ReadonlySet<string>,
-  previous: Session[],
-): Session[] => {
-  const gap = liveSessions.filter((session) => !globalSessionIds.has(session.id));
-  if (gap.length === previous.length && gap.every((session, index) => session === previous[index])) return previous;
-  return gap.length === 0 ? EMPTY_LIVE_GAP_SESSIONS : gap;
 };
 
 // The collection owns hierarchy membership. Consumers receive this narrow
@@ -292,7 +270,6 @@ export const useSessionProjectCollection = ({
   const globalStructure = useGlobalSessionsStore((state) => state.structure);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
-  const liveSessions = useAllLiveSessions();
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
   const sessionOrderRanks = useSessionOrderingStore(React.useCallback(
     (state) => isVisible ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
@@ -302,12 +279,10 @@ export const useSessionProjectCollection = ({
     () => new Set(globalActiveSessions.map((session) => session.id)),
     [globalActiveSessions],
   );
-  const liveGapSessionsRef = React.useRef<Session[]>(EMPTY_LIVE_GAP_SESSIONS);
-  const liveGapSessions = React.useMemo(() => {
-    const gap = selectLiveGapSessions(liveSessions, globalSessionIds, liveGapSessionsRef.current);
-    liveGapSessionsRef.current = gap;
-    return gap;
-  }, [globalSessionIds, liveSessions]);
+  // Only the live sessions the global cache does not hold yet: the merge drops
+  // a covered session's live copy, so its live bumps (`time.updated` on every
+  // streamed step) neither re-render the sidebar nor rebuild the structure.
+  const liveGapSessions = useLiveSessionsExcluding(globalSessionIds);
   const structure = React.useMemo(() => buildSidebarSessionStructure({
     globalActiveSessions,
     globalStructure,
@@ -349,46 +324,10 @@ export const useSessionProjectCollection = ({
     chatSessions,
     getDescendantIds: getDescendantIdsForAction,
     hasAuthoritativeGlobalSessions,
-    liveSessions,
     orderedSessions,
     pinnedSessionIds,
     sessionOrderRanks,
     sessions,
     rootSessions: structure.rootSessions,
   };
-};
-
-type UseRecentSessionCollectionArgs = {
-  enabled: boolean;
-  isVSCode: boolean;
-  pinnedSessionIds: Set<string>;
-  sessionOrderRanks: ReadonlyMap<string, number>;
-  sessions: Session[];
-};
-
-// Recent is a separate high-frequency collection view. Its active membership
-// never participates in project ownership or project section projection.
-export const useRecentSessionCollection = ({
-  enabled,
-  isVSCode,
-  pinnedSessionIds,
-  sessionOrderRanks,
-  sessions,
-}: UseRecentSessionCollectionArgs): Session[] => {
-  const activeSessionIdSet = useGlobalSessionStatusStore(
-    React.useCallback(
-      (state) => enabled && !isVSCode ? state.activeSessionIds : EMPTY_ACTIVE_SESSION_IDS,
-      [enabled, isVSCode],
-    ),
-  );
-
-  return React.useMemo(() => {
-    if (!enabled || isVSCode) return [];
-    countSyncPerformance('recentCandidatesVisited', sessions.length);
-    return orderSessionsByLifecycleScopes(
-      deriveRecentSessions(sessions, activeSessionIdSet),
-      pinnedSessionIds,
-      sessionOrderRanks,
-    );
-  }, [activeSessionIdSet, enabled, isVSCode, pinnedSessionIds, sessionOrderRanks, sessions]);
 };

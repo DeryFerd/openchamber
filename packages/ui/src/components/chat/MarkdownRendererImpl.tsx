@@ -4,7 +4,7 @@ import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import type { Part } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { openExternalUrl } from '@/lib/url';
+import { isAppLinkUrl, openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { Theme } from '@/types/theme';
@@ -36,9 +36,6 @@ import {
   applyMarkdownCodeBlockWrapState,
   applyMarkdownTableWrapState,
   decorateMarkdown,
-  getMarkdownCodeText,
-  layoutReservedCodeLines,
-  RESERVED_CODE_GUTTER_SELECTOR,
   stabilizeMarkdownTableWidths,
   type DecorateContext,
   type DecorateLabels,
@@ -60,6 +57,7 @@ import {
 import { fileReferenceExists, findUniqueFileByName } from './fileReferenceStat';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 import { detachedMarkdownDomCache, type DetachedMarkdownDomKey } from './markdown/detachedMarkdownDomCache';
+import { applyOpenFencePatch } from './markdown/openFenceIncremental';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 const useCurrentMermaidTheme = () => {
@@ -145,7 +143,6 @@ export interface MarkdownRendererProps {
   skipFadeIn?: boolean;
   className?: string;
   isStreaming?: boolean;
-  disableStreamAnimation?: boolean;
   variant?: MarkdownVariant;
   onShowPopup?: (content: ToolPopupContent) => void;
   enableFileReferences?: boolean;
@@ -243,6 +240,7 @@ const unwrapBlockCodePathTokens = (container: HTMLElement): void => {
 const extractPathCandidateFromElement = (element: HTMLElement): string => {
   if (element.tagName.toLowerCase() === 'a') {
     const href = element.getAttribute('href')?.trim();
+    if (href && isAppLinkUrl(href)) return '';
     const fileUrlPath = href ? localPathFromFileUrl(href) : null;
     if (fileUrlPath) {
       return fileUrlPath;
@@ -267,6 +265,7 @@ const extractHrefFileReferenceCandidate = (anchor: HTMLAnchorElement): string | 
   if (!href) {
     return null;
   }
+  if (isAppLinkUrl(href)) return null;
   const fileUrlPath = localPathFromFileUrl(href);
   if (fileUrlPath) {
     return fileUrlPath;
@@ -274,88 +273,68 @@ const extractHrefFileReferenceCandidate = (anchor: HTMLAnchorElement): string | 
   return isLikelyFilePath(href) ? href : null;
 };
 
-// Walks text nodes inside `<pre><code>` subtrees and wraps any substring that
-// looks like a `path[:line[:col]]` reference in a span carrying
-// `data-openchamber-block-path-token`. `annotateFileLinks` then promotes those
-// spans into clickable file links via the same existing pipeline used for
-// inline code (parseFileReference → fileReferenceExists → openFileReference).
-//
-// Idempotent: each `<code>` node is marked with
-// `data-openchamber-block-paths-scanned` once processed so the walk is not
-// repeated on the same element. When the renderer replaces the `<code>` subtree
-// (e.g. on content change during streaming), the new element lacks the marker and
-// will be rescanned on the next mutation-observer callback.
-const wrapBlockCodePathTokens = (container: HTMLElement): void => {
-  const codeBlocks = container.querySelectorAll<HTMLElement>('pre code');
-  if (codeBlocks.length === 0) {
-    return;
-  }
+// A path-like token (`path[:line[:col]]`) inside a `<pre><code>` block, by
+// its offsets in the block's code text.
+type BlockCodePathToken = { start: number; end: number; raw: string };
 
-  const doc = container.ownerDocument;
-  if (!doc) {
-    return;
-  }
-
-  for (const codeBlock of Array.from(codeBlocks)) {
-    if (codeBlock.getAttribute(CODE_BLOCK_PATH_SCANNED_ATTR) === 'true') {
-      continue;
+// The path-like tokens of each code block not scanned yet. Reads text only:
+// code is full of things shaped like paths (`console.log`, `this.state`),
+// and wrapping each one on mount restyled the block and re-serialized it for
+// assistive technology. A token becomes a span only once its file is
+// confirmed (`wrapBlockCodePathTokens`).
+const findBlockCodePathTokens = (container: HTMLElement): Array<{ codeBlock: HTMLElement; tokens: BlockCodePathToken[] }> => {
+  const blocks: Array<{ codeBlock: HTMLElement; tokens: BlockCodePathToken[] }> = [];
+  for (const codeBlock of Array.from(container.querySelectorAll<HTMLElement>('pre code'))) {
+    if (codeBlock.hasAttribute(CODE_BLOCK_PATH_SCANNED_ATTR)) continue;
+    const tokens: BlockCodePathToken[] = [];
+    // Skip absurdly large code blocks to keep the scan bounded.
+    const codeText = codeBlock.textContent ?? '';
+    const fullText = codeText.length > MAX_BLOCK_CODE_SCAN_LENGTH ? '' : codeText;
+    if (fullText.includes('.')) {
+      for (const match of fullText.matchAll(BLOCK_PATH_TOKEN_RE)) {
+        const raw = match[0];
+        if (raw && isLikelyFilePath(raw)) tokens.push({ start: match.index, end: match.index + raw.length, raw });
+      }
     }
+    blocks.push({ codeBlock, tokens });
+  }
+  return blocks;
+};
 
-    // Skip absurdly large code blocks to keep DOM work bounded.
-    if ((codeBlock.textContent ?? '').length > MAX_BLOCK_CODE_SCAN_LENGTH) {
-      codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
-      continue;
-    }
-
+// Wraps confirmed tokens of one code block in spans carrying
+// `data-openchamber-block-path-token`, which later passes treat like inline
+// code references, and marks the block scanned. A token whose text moved
+// since the scan stays text.
+const wrapBlockCodePathTokens = (
+  codeBlock: HTMLElement,
+  confirmed: Array<BlockCodePathToken & { decorate: (span: HTMLElement) => void }>,
+): void => {
+  const doc = codeBlock.ownerDocument;
+  if (confirmed.length > 0) {
     const walker = doc.createTreeWalker(codeBlock, NodeFilter.SHOW_TEXT);
     const textNodes: Text[] = [];
-    let currentNode = walker.nextNode();
-    while (currentNode) {
-      const textNode = currentNode as Text;
-      if (!textNode.parentElement?.closest('[data-md-code-line-number]')) {
-        textNodes.push(textNode);
-      }
-      currentNode = walker.nextNode();
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node instanceof Text) textNodes.push(node);
     }
-
-    const fullText = getMarkdownCodeText(codeBlock);
-    if (!fullText.includes('.')) {
-      codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
-      continue;
-    }
-
-    BLOCK_PATH_TOKEN_RE.lastIndex = 0;
-    const matches: Array<{ start: number; end: number; raw: string }> = [];
-    let match: RegExpExecArray | null = BLOCK_PATH_TOKEN_RE.exec(fullText);
-    while (match) {
-      const raw = match[0];
-      if (raw && isLikelyFilePath(raw)) {
-        matches.push({ start: match.index, end: match.index + raw.length, raw });
-      }
-      match = BLOCK_PATH_TOKEN_RE.exec(fullText);
-    }
-
-    for (const { start, end, raw } of matches.reverse()) {
+    const fullText = codeBlock.textContent ?? '';
+    for (const { start, end, raw, decorate } of [...confirmed].sort((left, right) => right.start - left.start)) {
+      if (fullText.slice(start, end) !== raw) continue;
       const startPosition = findTextPosition(textNodes, start, 'right');
       const endPosition = findTextPosition(textNodes, end, 'left');
-      if (!startPosition || !endPosition) {
-        continue;
-      }
+      if (!startPosition || !endPosition) continue;
 
       const range = doc.createRange();
       range.setStart(startPosition.node, startPosition.offset);
       range.setEnd(endPosition.node, endPosition.offset);
-
       const span = doc.createElement('span');
       span.setAttribute(BLOCK_PATH_TOKEN_ATTR, 'true');
       span.textContent = raw;
-
+      decorate(span);
       range.deleteContents();
       range.insertNode(span);
     }
-
-    codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
   }
+  codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
 };
 
 const getResolvedReference = (rawValue: string, effectiveDirectory: string): (ParsedFileReference & { resolvedPath: string }) | null => {
@@ -518,10 +497,11 @@ const useFileReferenceInteractions = ({
       }, delayMs);
     };
 
-    const annotateFileLinks = () => {
+    // Runs our own DOM writes with the mutation observer below ignoring them.
+    const writeAnnotations = (write: () => void) => {
       annotationWriteDepth += 1;
       try {
-        annotateFileLinksInner();
+        write();
       } finally {
         // Let the mutation events from our own writes flush before the
         // observer starts listening for real content changes again.
@@ -531,61 +511,92 @@ const useFileReferenceInteractions = ({
       }
     };
 
-    const annotateFileLinksInner = () => {
-      if (fileReferencesEnabled) {
-        wrapBlockCodePathTokens(container);
+    const setAttributeIfChanged = (element: HTMLElement, name: string, value: string) => {
+      if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+    };
+
+    const markFileLink = (candidate: HTMLElement, raw: string, targetPath: string) => {
+      setAttributeIfChanged(candidate, 'data-openchamber-file-link', 'true');
+      setAttributeIfChanged(candidate, 'data-openchamber-file-ref', raw);
+      setAttributeIfChanged(candidate, 'data-openchamber-file-path', targetPath);
+      setAttributeIfChanged(candidate, 'title', 'Open file');
+      if (candidate.tagName.toLowerCase() !== 'a') {
+        setAttributeIfChanged(candidate, 'role', 'button');
+        setAttributeIfChanged(candidate, 'tabindex', '0');
       }
+    };
+
+    // Where a reference opens: its own path once the file is confirmed (a
+    // path outside the workspace is not probed), the one workspace file of a
+    // bare name (`Renderer.tsx:42`, looked up once per name), or nowhere.
+    const resolveTarget = (resolved: ParsedFileReference & { resolvedPath: string }): Promise<string | null> => {
+      if (!isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory)) {
+        return Promise.resolve(resolved.resolvedPath);
+      }
+      const isBareName = !resolved.path.includes('/') && !resolved.path.includes('\\');
+      return fileReferenceExists(resolved.resolvedPath, effectiveDirectory).then((exists) => (
+        exists ? resolved.resolvedPath : isBareName ? findUniqueFileByName(resolved.path, effectiveDirectory) : null
+      ));
+    };
+
+    // One pass: find references, confirm them, then write every link of the
+    // pass at once. Nothing is written for a reference that leads nowhere.
+    const annotateFileLinks = () => {
       const candidates = container.querySelectorAll<HTMLElement>(
         `[data-markdown="inline-code"], a, ${BLOCK_PATH_TOKEN_SELECTOR}`,
       );
       let linkedCount = 0;
-
+      const links: Array<{ candidate: HTMLElement; resolvedPath: string; target: Promise<string | null> }> = [];
+      const unlinked: HTMLElement[] = [];
       for (const candidate of Array.from(candidates)) {
-        const rawCandidate = extractPathCandidateFromElement(candidate);
-        const resolved = getResolvedReference(rawCandidate, effectiveDirectory);
-        clearFileLinkAttributes(candidate);
-
-        if (!resolved) {
+        const resolved = getResolvedReference(extractPathCandidateFromElement(candidate), effectiveDirectory);
+        if (!resolved || linkedCount >= fileReferenceLinkLimit) {
+          unlinked.push(candidate);
           continue;
         }
-
-        if (linkedCount >= fileReferenceLinkLimit) {
-          continue;
-        }
-
         linkedCount += 1;
+        links.push({ candidate, resolvedPath: resolved.resolvedPath, target: resolveTarget(resolved) });
+      }
 
-        const outsideWorkspace = !isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory);
-        // A bare name (`Renderer.tsx:42`) that is not at the root is looked up
-        // by name in the workspace, once per name; only a unique match links.
-        const isBareName = !resolved.path.includes('/') && !resolved.path.includes('\\');
-        const targetPromise: Promise<string | null> = outsideWorkspace
-          ? Promise.resolve(resolved.resolvedPath)
-          : fileReferenceExists(resolved.resolvedPath, effectiveDirectory).then((exists) => (
-            exists ? resolved.resolvedPath : isBareName ? findUniqueFileByName(resolved.path, effectiveDirectory) : null
-          ));
+      const blocks = findBlockCodePathTokens(container).map(({ codeBlock, tokens }) => ({
+        codeBlock,
+        tokens: tokens.flatMap((token) => {
+          const resolved = getResolvedReference(token.raw, effectiveDirectory);
+          if (!resolved || linkedCount >= fileReferenceLinkLimit) return [];
+          linkedCount += 1;
+          return [{ ...token, target: resolveTarget(resolved) }];
+        }),
+      }));
 
-        void targetPromise.then((targetPath) => {
-          if (cancelled || !targetPath || !container.contains(candidate)) {
-            return;
+      writeAnnotations(() => {
+        for (const candidate of unlinked) clearFileLinkAttributes(candidate);
+      });
+      if (links.length === 0 && blocks.length === 0) return;
+
+      void Promise.all([
+        Promise.all(links.map((link) => link.target.then((targetPath) => ({ ...link, targetPath })))),
+        Promise.all(blocks.map(async ({ codeBlock, tokens }) => ({
+          codeBlock,
+          tokens: await Promise.all(tokens.map((token) => token.target.then((targetPath) => ({ ...token, targetPath })))),
+        }))),
+      ]).then(([linkResults, blockResults]) => {
+        if (cancelled) return;
+        writeAnnotations(() => {
+          for (const { candidate, resolvedPath, targetPath } of linkResults) {
+            if (!container.contains(candidate)) continue;
+            const latestRaw = extractPathCandidateFromElement(candidate);
+            if (getResolvedReference(latestRaw, effectiveDirectory)?.resolvedPath !== resolvedPath) continue;
+            if (targetPath) markFileLink(candidate, latestRaw, targetPath);
+            else clearFileLinkAttributes(candidate);
           }
-
-          const latestRawCandidate = extractPathCandidateFromElement(candidate);
-          const latestResolved = getResolvedReference(latestRawCandidate, effectiveDirectory);
-          if (!latestResolved || latestResolved.resolvedPath !== resolved.resolvedPath) {
-            return;
-          }
-
-          candidate.setAttribute('data-openchamber-file-link', 'true');
-          candidate.setAttribute('data-openchamber-file-ref', latestRawCandidate);
-          candidate.setAttribute('data-openchamber-file-path', targetPath);
-          candidate.setAttribute('title', 'Open file');
-          if (candidate.tagName.toLowerCase() !== 'a') {
-            candidate.setAttribute('role', 'button');
-            candidate.setAttribute('tabindex', '0');
+          for (const { codeBlock, tokens } of blockResults) {
+            if (!container.contains(codeBlock) || codeBlock.hasAttribute(CODE_BLOCK_PATH_SCANNED_ATTR)) continue;
+            wrapBlockCodePathTokens(codeBlock, tokens.flatMap(({ start, end, raw, targetPath }) => (
+              targetPath ? [{ start, end, raw, decorate: (span: HTMLElement) => markFileLink(span, raw, targetPath) }] : []
+            )));
           }
         });
-      }
+      });
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -767,17 +778,6 @@ const markLastMarkdownBlock = (target: HTMLElement): void => {
   }
 };
 
-// Safari has no requestIdleCallback; there a short timeout stands in and one
-// block is handled per task.
-const scheduleIdle = (run: (deadline?: IdleDeadline) => void): (() => void) => {
-  if ('requestIdleCallback' in window) {
-    const handle = window.requestIdleCallback(run, { timeout: 500 });
-    return () => window.cancelIdleCallback(handle);
-  }
-  const handle = setTimeout(() => run(), 16);
-  return () => clearTimeout(handle);
-};
-
 const BLOCK_ENTER_CLASS = 'oc-md-block-enter';
 
 /**
@@ -788,6 +788,20 @@ const clearBlockEnterAnimation = (target: HTMLElement): void => {
   for (const element of Array.from(target.querySelectorAll<HTMLElement>(`.${BLOCK_ENTER_CLASS}`))) {
     element.classList.remove(BLOCK_ENTER_CLASS);
     element.style.removeProperty('--oc-md-enter-delay');
+  }
+};
+
+/**
+ * A morph to the next step's HTML drops the entrance animation of a block
+ * that just entered, since only new blocks carry it. A patched block drops it
+ * the same way, so both paths leave the same DOM.
+ */
+const clearPatchedBlockEnterAnimation = (block: HTMLElement): void => {
+  for (const child of Array.from(block.children)) {
+    if (!(child instanceof HTMLElement) || !child.classList.contains(BLOCK_ENTER_CLASS)) continue;
+    child.classList.remove(BLOCK_ENTER_CLASS);
+    child.style.removeProperty('--oc-md-enter-delay');
+    if (!child.getAttribute('style')) child.removeAttribute('style');
   }
 };
 
@@ -857,7 +871,6 @@ const readCopyFormat = (): RenderedCopyFormat => (
 
 const useDecorateContext = (
   currentTheme: Theme,
-  deferCodeLineNumberSync: boolean,
   onPreviewLoopback?: (url: string) => void,
   mermaidControls: MermaidControlOptions = DEFAULT_MERMAID_CONTROLS,
 ): DecorateContext => {
@@ -917,15 +930,7 @@ const useDecorateContext = (
     };
   }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, toggleCodeBlockLineWrap, tableCellWrap, toggleTableCellWrap, onPreviewLoopback]);
 
-  // Streaming only defers code line numbers, which the settled pass fills in
-  // per block. Both variants share one decoration identity, so a finished
-  // stream keeps every block's DOM instead of decorating the reply again.
-  const streamingCtx = React.useMemo<DecorateContext>(() => {
-    const variant = { ...ctx, deferCodeLineNumberSync: true };
-    MARKDOWN_DECORATION_IDS.set(variant, getMarkdownDecorationId(ctx));
-    return variant;
-  }, [ctx]);
-  return deferCodeLineNumberSync ? streamingCtx : ctx;
+  return ctx;
 };
 
 // Runs the async render pipeline into the container and keeps a stable
@@ -940,14 +945,10 @@ const useMorphdomMarkdown = ({
   ctx,
   domCacheKey,
   tableLayoutSettled,
-  growing = streaming,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   text: string;
   streaming: boolean;
-  // The text is still streaming, though rendered as settled when `streaming`
-  // is false (the sorted chat mode): its steps stay out of settled caches.
-  growing?: boolean;
   imageMode?: MarkdownImageMode;
   rawHtml?: MarkdownRawHtmlMode;
   syntaxVars: Record<string, string>;
@@ -1030,44 +1031,19 @@ const useMorphdomMarkdown = ({
     tableLayoutFrameRef.current = null;
   }, []);
 
-  // Code blocks decorated while streaming reserve the line-number gutter but
-  // leave out the numbers. Once the message settles, the numbers are filled in
-  // one block at a time in idle time, not all in the task that ends the stream.
-  const latestCtxRef = React.useRef(ctx);
-  const streamingRef = React.useRef(streaming);
+  // Syntax colours are CSS variables on the content node, set imperatively so
+  // they survive morphdom updates. Set before the content below is inserted:
+  // custom properties inherit, so writing them after the browser styled the
+  // blocks restyled every one of them again, and a session opening paid that
+  // for its whole transcript. Rewriting an unchanged value invalidates nothing.
   React.useLayoutEffect(() => {
-    latestCtxRef.current = ctx;
-    streamingRef.current = streaming;
-  }, [ctx, streaming]);
-  const cancelLineNumberTaskRef = React.useRef<(() => void) | null>(null);
-  const scheduleCodeLineNumbers = React.useCallback(() => {
-    if (cancelLineNumberTaskRef.current) return;
-    const run = (deadline?: IdleDeadline) => {
-      cancelLineNumberTaskRef.current = null;
-      if (streamingRef.current) return;
-      const container = containerRef.current;
-      const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
-      if (!target) return;
-      const pending = target.querySelectorAll<HTMLPreElement>(RESERVED_CODE_GUTTER_SELECTOR);
-      let done = 0;
-      do {
-        const pre = pending[done];
-        if (!pre) break;
-        // Laying out lines rebuilds plain code text, which would drop file
-        // links already found in it; unwrap them so the annotation pass,
-        // woken by this mutation, finds them again.
-        if (pre.querySelector(`code[${CODE_BLOCK_PATH_SCANNED_ATTR}]`)) unwrapBlockCodePathTokens(pre);
-        layoutReservedCodeLines(pre, latestCtxRef.current);
-        done += 1;
-      } while (deadline && deadline.timeRemaining() > 4);
-      if (done < pending.length) cancelLineNumberTaskRef.current = scheduleIdle(run);
-    };
-    cancelLineNumberTaskRef.current = scheduleIdle(run);
-  }, [containerRef]);
-  React.useEffect(() => () => {
-    cancelLineNumberTaskRef.current?.();
-    cancelLineNumberTaskRef.current = null;
-  }, []);
+    const container = containerRef.current;
+    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+    if (!target) return;
+    for (const [key, value] of Object.entries(syntaxVars)) {
+      target.style.setProperty(key, value);
+    }
+  }, [containerRef, syntaxVars]);
 
   React.useLayoutEffect(() => {
     renderRevisionRef.current += 1;
@@ -1088,7 +1064,6 @@ const useMorphdomMarkdown = ({
       for (const block of Array.from(target.children)) {
         block.setAttribute(MARKDOWN_DECORATION_ID_ATTR, decorationId);
       }
-      for (const [key, value] of Object.entries(syntaxVars)) target.style.setProperty(key, value);
       applyMarkdownCodeBlockWrapState(target, ctx.codeBlockLineWrap, ctx.labels);
       applyMarkdownTableWrapState(target, ctx.tableCellWrap, ctx.labels);
       mountedDomRef.current = {
@@ -1097,7 +1072,7 @@ const useMorphdomMarkdown = ({
       };
       streamPerfCount('ui.markdown_renderer.dom_cache.hit');
     }
-  }, [containerRef, ctx, domCacheKey, syntaxVars, text.length]);
+  }, [containerRef, ctx, domCacheKey, text.length]);
 
   // Restoration follows the cache identity above, but capture must only happen
   // when this renderer lifecycle ends. Combining both in one keyed effect would
@@ -1144,7 +1119,7 @@ const useMorphdomMarkdown = ({
       // block whose code is not highlighted yet carries an id that render
       // does not match, so it recolours that block in place and keeps every
       // other block's DOM (selection, file links, images, disclosures).
-      const blocks = renderMarkdownBlocksSync(text, streaming, imageMode, rawHtml, growing);
+      const blocks = renderMarkdownBlocksSync(text, streaming, imageMode, rawHtml);
       let hasMermaidBlock = false;
       for (const renderedBlock of blocks) {
         const block = document.createElement('div');
@@ -1170,7 +1145,7 @@ const useMorphdomMarkdown = ({
       // or re-decorating ordinary blocks.
       refreshMermaidViewers();
     }
-  }, [containerRef, text, streaming, growing, imageMode, rawHtml, ctx, refreshMermaidViewers, tableLayoutSettled, layoutTablesNow]);
+  }, [containerRef, text, streaming, imageMode, rawHtml, ctx, refreshMermaidViewers, tableLayoutSettled, layoutTablesNow]);
 
   React.useEffect(() => () => {
     mermaidViewerRef.current?.cleanup();
@@ -1186,19 +1161,18 @@ const useMorphdomMarkdown = ({
     const decorationId = getMarkdownDecorationId(ctx);
 
     if (!streaming) {
-      const cachedBlocks = getCachedMarkdownBlocks(text, imageMode, rawHtml, growing);
+      const cachedBlocks = getCachedMarkdownBlocks(text, imageMode, rawHtml);
       if (cachedBlocks && domMatchesRenderedBlocks(target, cachedBlocks, decorationId)) {
         mountedDomRef.current = domCacheKey
           ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
           : null;
         streamPerfCount('ui.markdown_renderer.settled_paint.reused');
-        scheduleCodeLineNumbers();
         scheduleTableLayout();
         return;
       }
     }
 
-    void renderMarkdownBlocks(text, streaming, imageMode, rawHtml, growing).then((blocks) => {
+    void renderMarkdownBlocks(text, streaming, imageMode, rawHtml).then((blocks) => {
       if (!active || renderRevisionRef.current !== renderRevision) return;
       const existing = Array.from(target.children) as HTMLElement[];
       // Reconciling against freshly parsed HTML drops the measured column
@@ -1246,6 +1220,18 @@ const useMorphdomMarkdown = ({
           if (!mermaidViewerRef.current && shouldRefreshMermaidViewers(el)) {
             refreshMermaidViewers();
           }
+          return;
+        }
+
+        // A code fence still streaming: keep the lines already painted and
+        // add the new ones instead of rebuilding and diffing the whole block.
+        const paintedId = el.getAttribute('data-md-id');
+        const patch = paintedId && el.getAttribute(MARKDOWN_DECORATION_ID_ATTR) === decorationId
+          ? block.patchFrom?.(paintedId)
+          : null;
+        if (patch && applyOpenFencePatch(el, patch)) {
+          clearPatchedBlockEnterAnimation(el);
+          el.setAttribute('data-md-id', block.id);
           return;
         }
 
@@ -1312,7 +1298,6 @@ const useMorphdomMarkdown = ({
       mountedDomRef.current = domCacheKey
         ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
         : null;
-      if (!streaming) scheduleCodeLineNumbers();
       if (resetsMeasuredTables) layoutTablesNow();
       else scheduleTableLayout();
     });
@@ -1320,30 +1305,13 @@ const useMorphdomMarkdown = ({
     return () => {
       active = false;
     };
-  }, [containerRef, ctx, domCacheKey, growing, imageMode, rawHtml, refreshMermaidViewers, layoutTablesNow, scheduleCodeLineNumbers, scheduleTableLayout, streaming, tableLayoutSettled, text]);
+  }, [containerRef, ctx, domCacheKey, imageMode, rawHtml, refreshMermaidViewers, layoutTablesNow, scheduleTableLayout, streaming, tableLayoutSettled, text]);
 
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     return attachMarkdownInteractions(container, ctx);
   }, [containerRef, ctx]);
-
-  // Apply syntax CSS variables imperatively so they survive morphdom updates.
-  React.useEffect(() => {
-    const container = containerRef.current;
-    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
-    if (!target) return;
-    for (const [key, value] of Object.entries(syntaxVars)) {
-      target.style.setProperty(key, value);
-    }
-  }, [containerRef, syntaxVars]);
-
-  // DOM painted before the stream ended may still hold code blocks whose
-  // numbers were deferred.
-  React.useEffect(() => {
-    if (!streaming) scheduleCodeLineNumbers();
-  }, [scheduleCodeLineNumbers, streaming]);
-
 };
 
 const markdownContentClassName = (variant: MarkdownVariant): string =>
@@ -1361,7 +1329,6 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   skipFadeIn = false,
   className,
   isStreaming = false,
-  disableStreamAnimation = false,
   variant = 'assistant',
   onShowPopup,
   enableFileReferences = true,
@@ -1380,7 +1347,6 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     openContextPreview(effectiveDirectory, url);
   }, [effectiveDirectory, openContextPreview]);
 
-  const live = isStreaming && !disableStreamAnimation;
 
   useMermaidInlineInteractions({
     containerRef,
@@ -1398,7 +1364,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   useLinkInteractions({ containerRef });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
-  const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
+  const ctx = useDecorateContext(currentTheme, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
   const { locale } = useI18n();
   // Assistant images live in the gallery under the message; tool output and
   // reasoning draw local images and link remote ones (see MarkdownImageMode).
@@ -1434,8 +1400,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   useMorphdomMarkdown({
     containerRef,
     text: content,
-    streaming: live,
-    growing: isStreaming,
+    streaming: isStreaming,
     imageMode,
     syntaxVars,
     ctx,
@@ -1463,7 +1428,6 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
 export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) => {
   return prev.content === next.content
     && prev.isStreaming === next.isStreaming
-    && prev.disableStreamAnimation === next.disableStreamAnimation
     && prev.variant === next.variant
     && prev.isAnimated === next.isAnimated
     && prev.skipFadeIn === next.skipFadeIn
@@ -1526,7 +1490,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   useLinkInteractions({ containerRef, enabled: !disableLinkSafety });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
-  const ctx = useDecorateContext(currentTheme, false, undefined, mermaidControls);
+  const ctx = useDecorateContext(currentTheme, undefined, mermaidControls);
 
   useMorphdomMarkdown({
     containerRef,

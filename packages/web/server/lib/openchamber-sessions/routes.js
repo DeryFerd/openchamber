@@ -2,8 +2,14 @@ import { asNonEmptyString } from '../shared/guards.js';
 import express from 'express';
 import {
   createWorktree as createWorktreeDefault,
+  getBranches as getBranchesDefault,
   getWorktreeBootstrapStatus as getWorktreeBootstrapStatusDefault,
+  listStashes as listStashesDefault,
+  removeWorktree as removeWorktreeDefault,
   resolvePrimaryWorktreeRoot,
+  stashApply as stashApplyDefault,
+  stashDrop as stashDropDefault,
+  stashPush as stashPushDefault,
 } from '../git/index.js';
 import { parseModelSelection } from '../opencode/config-v2.js';
 import { expandSnippets } from '../opencode/snippets.js';
@@ -16,6 +22,7 @@ import { createArchiveStore } from './archive-store.js';
 import { applyForkInheritance } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
+import { createSessionWorktreeMover } from './worktree-move.js';
 
 const asList = (value) => (Array.isArray(value) ? value : []);
 
@@ -446,6 +453,13 @@ export const createOpenChamberSessionService = (dependencies) => {
     createOpenCodeClient = defaultCreateOpenCodeClient,
     createWorktree = createWorktreeDefault,
     getWorktreeBootstrapStatus = getWorktreeBootstrapStatusDefault,
+    // What moving a session into a new worktree needs from git beyond creation.
+    removeWorktree = removeWorktreeDefault,
+    getBranches = getBranchesDefault,
+    stashPush = stashPushDefault,
+    stashApply = stashApplyDefault,
+    stashDrop = stashDropDefault,
+    listStashes = listStashesDefault,
     // Auto routing. Sessions dispatched here talk to OpenCode through the SDK,
     // not through the proxy that intercepts the Auto sentinel, so a default of
     // `openchamber/auto` (Session Defaults) is resolved here before the
@@ -1090,6 +1104,43 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
   };
 
+  const worktreeMover = createSessionWorktreeMover({
+    createWorktree,
+    removeWorktree,
+    getBranches,
+    stashPush,
+    stashApply,
+    stashDrop,
+    listStashes,
+    resolvePrimaryWorktreeRoot,
+    bootstrapStore: worktreeBootstrapStore,
+    waitForWorktreeReady: (directory) => waitForWorktreeBootstrapReady({ directory, bootstrapStore: worktreeBootstrapStore }),
+    hydrateCheckout: hydrateWorktreeCheckout,
+    // The move is global in v2: no directory header, the session id names it.
+    moveSession: (sessionID, directory) => clientFor(undefined).session.move({ sessionID, directory }),
+  });
+
+  /**
+   * Move an existing session into a new worktree of its repository, carrying
+   * the checkout's uncommitted changes along (`./worktree-move.js`). The
+   * worktree needs the same bootstrap as `create` gives a new one.
+   */
+  const moveToWorktree = async (sessionID, payload = {}) => {
+    if (!(hydrateWorktreeCheckout instanceof Function)
+      || !(worktreeBootstrapStore?.read instanceof Function)
+      || !(worktreeBootstrapStore?.write instanceof Function)) {
+      throw new OpenChamberControlError('Worktree checkout bootstrap is not available', 501);
+    }
+    await waitForOpenCodeReady?.(10_000, 250);
+    return worktreeMover.move({
+      sessionId: sessionID,
+      directory: asNonEmptyString(payload.directory),
+      name: asNonEmptyString(payload.worktree?.name),
+      branchName: asNonEmptyString(payload.worktree?.branchName),
+      startRef: asNonEmptyString(payload.worktree?.startRef),
+    });
+  };
+
   // The control service's session reads resolve projectId through the same
   // lookup as create/send/fork, so an unknown project or a missing project
   // folder fails the same way everywhere.
@@ -1115,6 +1166,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     getMetadata,
     send: (sessionID, payload) => runExisting('send', sessionID, payload),
     fork: (sessionID, payload) => runExisting('fork', sessionID, payload),
+    moveToWorktree,
   };
 };
 

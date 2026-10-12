@@ -5,7 +5,9 @@ import type { Session } from "@/lib/opencode/model"
 import { switchRuntimeEndpoint } from "@/lib/runtime-switch"
 import {
   flushPendingSessionWrites,
+  forgetDirCache,
   persistGlobalSessionSnapshot,
+  persistIcon,
   persistManagedChatSessions,
   persistSessions,
   readDirCache,
@@ -254,6 +256,23 @@ const fullSession = (index: number, updated: number, sessionDirectory = director
     resource: `/Users/someone/projects/repository-${rule}/**/*.{ts,tsx,js,jsx,json,md}`,
     effect: rule % 3 === 0 ? "deny" : "allow",
   })),
+})
+
+describe("forgetting a directory", () => {
+  test("drops its snapshot, a pending write of it, and its metadata", async () => {
+    persistSessions(directory, [session(1, 1000)])
+    persistIcon(directory, "folder")
+    await waitForPersistence()
+    expect(readDirCache(directory).sessions?.length).toBe(1)
+    // A newer snapshot still waiting for its throttled write must not come back either.
+    persistSessions(directory, [session(1, 1000), session(2, 2000)])
+    forgetDirCache(directory)
+    expect(readDirCache(directory).sessions).toBeUndefined()
+    expect(readDirCache(directory).icon).toBeUndefined()
+    await waitForPersistence()
+    expect(readDirCache(directory).sessions).toBeUndefined()
+    expect([...storage.values.keys()].filter((key) => key.includes(hashCode(`runtime-default\0${directory}`)))).toEqual([])
+  })
 })
 
 describe("persisted session projection", () => {

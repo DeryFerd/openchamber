@@ -263,7 +263,7 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
                     onClick={() => setCollapsed((value) => !value)}
                     aria-expanded={!collapsed}
                     aria-label={collapsed ? t('chat.formDock.expandAria') : t('chat.formDock.collapseAria')}
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left text-muted-foreground transition-colors hover:text-foreground"
+                    className="flex min-w-0 flex-1 items-center gap-2 text-start text-muted-foreground transition-colors hover:text-foreground"
                 >
                     <Icon name="question" className="size-3.5 shrink-0 text-primary" />
                     <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" />

@@ -6,7 +6,6 @@ export type TimelineEntry =
         kind: 'ungrouped';
         key: string;
         message: ChatMessageEntry;
-        previousMessage?: ChatMessageEntry;
         nextMessage?: ChatMessageEntry;
     }
     | {
@@ -71,7 +70,6 @@ const orderHistoryEntries = ({
             kind: 'ungrouped',
             key: `msg:${message.info.id}`,
             message,
-            previousMessage: index > 0 ? messages[index - 1] : undefined,
             nextMessage: index < messages.length - 1 ? messages[index + 1] : undefined,
         });
     });
@@ -87,7 +85,6 @@ const isSameEntry = (previous: TimelineEntry, next: TimelineEntry): boolean => {
     }
     if (previous.kind === 'ungrouped' && next.kind === 'ungrouped') {
         return previous.message === next.message
-            && previous.previousMessage === next.previousMessage
             && previous.nextMessage === next.nextMessage;
     }
     return false;

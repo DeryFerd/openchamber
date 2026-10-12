@@ -1,3 +1,48 @@
+## [2.3.0] - 2026-10-12
+
+### New
+
+- Languages: Arabic and Hebrew, with the whole layout mirrored right to left.
+- Chat: Stop all on the background commands strip stops every command at once, and the agent answers once.
+- Usage: OpenCode Go shows your credit balance next to the meters (thanks to @pstonesudol).
+
+### Improvements
+
+- **Live replies:** a streaming reply appears a paragraph or list item at a time, and the chat stops scrolling at the start of a long reply so you can read it from the top. With Activity collapsed, a working turn shows its latest 7 steps and a "+N more" count.
+- Composer: the queue, the session goal, a staged revert and the auto review sit as rows at the top of the composer. A staged revert offers Restore only.
+- Composer: the choice to attach a large paste as a file shows right above the input.
+- Chat: the row under an answer keeps copy, fork and pin; the other actions moved into a "more" menu.
+- Settings/Projects: the project page has General, Actions, Worktrees and Environment tabs, with the name, icon and colour edited in its header. Each action and setup command says whether it is shared with the team or only yours.
+- Sessions: sending a message to an archived session brings it back to the sidebar (thanks to @rasyidrafi).
+- Usage: Claude usage without a Claude Code login offers the sign-in right on that page.
+
+### Fixes
+
+- **Notifications:** finished turns, errors and questions show as VS Code notifications with an Open Session button. They used to notify nobody.
+- Settings/MCP: servers from both global OpenCode config files show up (thanks to @IbrahimKhan12).
+- Chat: a turn that failed shows its error. It used to read "The running turn was stopped".
+- Chat: Copy and Save as image under an answer take the whole turn, including what the agent wrote before its tool calls.
+- Chat: a permission that has nothing to remember offers Deny and Allow once only, so Always allow no longer behaves like Allow once.
+- Chat: when a send fails to cancel a pending question or permission, its card comes back so you can answer it.
+- Chat: an Escape that closes a dialog or menu no longer counts toward the double Escape that stops a run.
+- Chat: a cancelled MCP form disappears from the composer.
+- Composer: Enter in an empty composer no longer sends the whole queue into the running turn.
+- Composer: when a send takes the queued messages, each of them shows in the chat in order. They used to reach the model hidden and out of order.
+- Composer: Shift+Enter adds a new line when Ctrl/Cmd+Enter sends.
+- Composer: a click above or below the text puts the caret on the nearest line under the pointer.
+- Settings/Providers: Vertex signed in with `gcloud auth application-default login` shows as connected.
+- Settings/MCP: an imported server name with capitals saves, and a failed save says why.
+- Usage: Kimi accounts on the monthly plan show their quota again (thanks to @CMBill).
+- Usage: Ollama Cloud usage stays signed in. It now uses the API key OpenCode already has (thanks to @kydorn).
+- Usage: OpenCode Go usage loads with a key stored on OpenCode Console.
+- Sidebar: session times such as "4m" and "15h" and relative dates are translated in every language.
+
+### Misc
+
+- The Sorted chat mode is gone. Parts show in the order they ran, and Activity Default decides whether a finished turn folds; a saved Sorted choice reads as Collapsed.
+- The settings that opened shell and edit tool rows by default are gone. Every tool row opens on a click.
+- The sticky user header setting is gone. Your message scrolls with the chat, with its actions under the bubble.
+
 ## [2.2.0] - 2026-10-08
 
 ### New

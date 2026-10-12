@@ -2655,7 +2655,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="mr-6 h-7 shrink-0 gap-1.5 px-2"
+                className="me-6 h-7 shrink-0 gap-1.5 px-2"
                 onClick={() => {
                   if (gitLogDialogMode === 'graph') {
                     setGraphLogRefreshToken((token) => token + 1);

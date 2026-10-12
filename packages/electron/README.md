@@ -98,6 +98,11 @@ PDF iframes also start with an opaque origin under the packaged UI protocol. The
 
 The preload bridge exposes desktop-only APIs to the web UI through `window.__OPENCHAMBER_DESKTOP__`. Privileged commands are checked in `main.mjs`, not only in the UI.
 
+Confirmed chat application links use the local-page-gated `desktop_open_external_url`
+command and the OS protocol handler. `external-url-policy.mjs` validates schemes
+again in main, with the same exclusions as the shared UI classifier. Native
+opening failures do not fall back to a browser window for application links.
+
 The compatibility gate can reuse the embedded managed OpenCode CLI preflight
 through `desktop_managed_opencode_compatible`. Main matches the requested
 API origin to the local backend and reads the lifecycle-owned preflight promise.
@@ -127,6 +132,7 @@ IPC results if its endpoint changes while the read is pending.
 | `preload.mjs` | Safe bridge from the rendered UI to Electron IPC |
 | `ssh-manager.mjs` | SSH host import, connection lifecycle, tunnel/port forwarding helpers |
 | `startup-ssh.mjs` | Opening the default SSH instance's tunnel during startup, bounded, with teardown so a failed attempt boots Local (`sshStartupFallbackHostId` in the boot outcome) |
+| `dev-dock-identity.mjs` | Unpackaged macOS runs only: the dev icon, the app icon behind construction tape, in the Dock and the issue or PR number from the checked-out branch on its badge, so copies from several worktrees can be told apart. On a numbered branch the number keeps the badge over the unread-chats count; without a number the count works as in the packaged app |
 | `scripts/electron-dev.mjs` | Desktop dev launcher with Vite HMR support |
 | `scripts/ensure-electron.mjs` | Verifies the installed Electron binary is complete and repairs it via the postinstall under Bun |
 | `scripts/build-web-assets.mjs` | Builds `packages/web` and stages UI assets into `resources/web-dist` |
@@ -228,6 +234,8 @@ That runs, in order:
 
 Build output goes to `packages/electron/dist`.
 
+Electron Builder copies the `@openchamber/web` workspace package whole, ignoring its `files` field, so `build.files` in `package.json` excludes what the packaged runtime never loads: the web package's `dist` (packaged builds serve `Resources/web-dist` through `OPENCHAMBER_DIST_DIR`), its `src`, configs, tests and stray tarballs; TypeScript sources, source maps and Markdown other than licenses from every dependency; `bun-pty`, which only the Bun runtime imports; luxon builds other than `build/node` (CommonJS, for cron-parser) and `build/es6` (ESM, for the server); and `node-pty` prebuilds other than `${platform}-${arch}` (the Electron-rebuilt `build/Release` binary loads first; `${platform}` is the build host, which matches the target because `rebuild:native` already builds for the host OS). Keep these exclusions in the top-level `files`: Electron Builder treats a platform-level `files` list as its own file set, and one holding only exclusions copies the whole package directory into the archive. The `afterPack` hook then reads the `app.asar` header (`scripts/packaged-app-contents.cjs`) and fails the build when anything outside `node_modules` other than the bundled main files, `preload.mjs` and `package.json` is packed, when the web `dist` is packed, or when the bundled main files, the web server entry and manifest, or the unpacked git helpers are missing.
+
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage for the native x64 or arm64 host.
 
 ## Platform Notes
@@ -238,7 +246,11 @@ Windows packaging needs NSIS support through `electron-builder`. If no Windows s
 
 Linux AppImages must be built natively. Set `OPENCHAMBER_TARGET_ARCH=x64` or `OPENCHAMBER_TARGET_ARCH=arm64` when packaging; the build rejects a target that does not match the Linux host. The same target selects the bundled OpenCode CLI, native Electron rebuild, and Electron Builder architecture. Linux identity is stable across architectures: executable `openchamber`, desktop file `openchamber.desktop`, icon `openchamber`, and `StartupWMClass=openchamber`.
 
-After packaging, run `bun run --cwd packages/electron verify:linux-appimage`. The verifier extracts the final AppImage and checks its ELF architecture, desktop identity, Electron executable, pinned OpenCode CLI version and architecture, and all packaged native `.node` modules.
+The Linux icon is the 512×512 `resources/icons/app-icon.png`, which the AppImage carries at `usr/share/icons/hicolor/512x512/apps/openchamber.png`. Keep it a PNG of at most 512×512: electron-builder's default AppImage path puts an SVG at `hicolor/scalable/` without the `apps/` directory, and the hicolor theme declares no size above 512, so in both cases launchers cannot resolve `Icon=openchamber` (#4766, #2934).
+
+GNOME 46+ shows a window's icon only through a `.desktop` file that matches its app id (`openchamber`); a window without one gets the generic executable icon on Wayland and XWayland alike. So a packaged AppImage started directly, with no integration tool, writes its own launcher entry at startup (`linux-desktop-entry.mjs`): `$XDG_DATA_HOME/applications/openchamber.desktop`, marked `X-OpenChamber-Managed=true`, with the image's 512×512 icon copied to `$XDG_DATA_HOME/icons/hicolor/512x512/apps/openchamber.png`. Each start rewrites `Exec` and `TryExec` if the AppImage moved; `TryExec` hides the entry once the file is deleted. The app never touches an entry without that marker, and it withdraws its own once another integration exists: a launch with `DESKTOPINTEGRATION` set (Gear Lever), or another entry in `$XDG_DATA_HOME/applications`, where those tools write theirs, that is named `openchamber.desktop`, claims `StartupWMClass=openchamber`, or starts this AppImage. An entry the user hid with a menu editor (`NoDisplay=true` or `Hidden=true`) is left as it is. GNOME re-matches open windows when the entry appears, so the first launch gets its icon a few seconds after start. A future system package that installs its own `openchamber.desktop` must remove this marked user entry on its first start, because the user entry takes precedence over the system one.
+
+After packaging, run `bun run --cwd packages/electron verify:linux-appimage`. The verifier extracts the final AppImage and checks its ELF architecture, desktop identity, theme icon and `.DirIcon`, Electron executable, pinned OpenCode CLI version and architecture, and all packaged native `.node` modules.
 
 Running a packaged Linux AppImage requires FUSE (`libfuse.so.2`, typically `libfuse2` / `libfuse2t64` on Debian/Ubuntu). Without FUSE, start with `APPIMAGE_EXTRACT_AND_RUN=1`. Keep the AppImage on a writable path so in-app updates can replace it.
 
@@ -284,9 +296,10 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 |----------|-----|
 | `OPENCHAMBER_ELECTRON_DEV=1` | Marks the runtime as desktop development mode |
 | `OPENCHAMBER_ELECTRON_USE_BUNDLED_UI=1` | Uses staged web assets instead of the HMR dev server |
-| `OPENCHAMBER_SKIP_LOCAL_SERVER=1` | Skips the in-process local OpenChamber server and uses the configured default remote instance; Desktop imports this from the user's login-shell environment, and packaged/bundled UI remains available for connection recovery |
+| `OPENCHAMBER_SKIP_LOCAL_SERVER=1` | Skips the in-process local OpenChamber server and uses the configured default remote instance; Desktop imports this from the user's login-shell environment, and packaged/bundled UI remains available for connection recovery. The host switcher then lists no Local entry |
 | `OPENCHAMBER_HMR_UI_PORT` | Preferred Vite UI port for desktop dev, default `5173` |
 | `OPENCHAMBER_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
+| `OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT` | Development only: opens Chromium's DevTools protocol on this loopback port so a debugger can attach to the dev window; ignored in packaged builds |
 | `OPENCHAMBER_RUNTIME=desktop` | Set by Electron before starting the web server |
 | `OPENCHAMBER_OPENCODE_CLI_VERSION` | Optional packaging override for the bundled OpenCode CLI version; defaults to `opencodeCli.version` in `packages/electron/package.json` |
 | `OPENCHAMBER_TARGET_ARCH` | Explicit desktop package architecture (`x64` or `arm64`); Linux requires it to match the native host |
@@ -329,7 +342,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
   connects to a remote API server; remote pages receive no native picker privileges.
 - One-click open/reveal/open-in-app actions.
 - Desktop host switcher and deep-link imports.
-- Local and remote instance handling.
+- Local and remote instance handling. The switcher lists Local only with the origin main reports for the local server, never with the page's own origin. A window can show another instance's own page, for example after a connect link redirects to that server. Such a page cannot switch to Local in place, because the local server answers only the app's own origins and the local token stays with local pages. The switcher asks main through the remote-safe `desktop_switch_to_local`, and main loads the Local UI into the main window the way `openchamber://host/local` does. The command acts only for the main window, because other windows keep the runtime they were opened with. Everywhere else it returns false and the switcher switches in place.
 - SSH host import, connections, logs, and port forwarding.
 - SSH uses OpenSSH ControlMaster on macOS/Linux. Windows uses independent hidden OpenSSH processes for setup commands and each long-lived forward because Win32 OpenSSH does not support ControlMaster reliably.
 - With ControlMaster, every forward, the main one included, is added with `ssh -O forward`: the master holds the listener, and that command's exit status is the answer. A `-N -L` client through the master would open a remote login shell and exit with that shell's status, which says nothing about the forward. The connection monitor then watches the local port and the master.

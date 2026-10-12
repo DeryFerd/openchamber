@@ -356,6 +356,16 @@ export function persistSessions(directory: string, sessions: Session[] | undefin
   scheduleSessionCacheWrite(directory, sessions)
 }
 
+/**
+ * Drops everything cached for a directory the host no longer has: its session
+ * snapshot, a pending write of it included, and its metadata. The legacy keys go
+ * with the current ones, so nothing of the directory comes back at the next start.
+ */
+export function forgetDirCache(directory: string): void {
+  pendingSessionWrites.delete(cacheKey(directory, "sessions"))
+  for (const key of ["vcs", "projectMeta", "icon", "sessions"] as const) writeCache(directory, key, undefined)
+}
+
 export function readManagedChatSessions(expectedRuntimeKey = getRuntimeKey()): Session[] {
   if (isVSCodeRuntime()) return []
   if (expectedRuntimeKey !== getRuntimeKey()) return []

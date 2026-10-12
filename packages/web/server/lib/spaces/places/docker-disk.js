@@ -1,5 +1,5 @@
 // The disk that spaces take on the Docker place, and the clean-up of what OpenChamber can make
-// again by itself (DESIGN.md, journey step 9 and decision 12): this owner's tools volumes but the
+// again by itself (journey step 9 and decision 12): this owner's tools volumes but the
 // current one, this owner's leftover one-shot containers, the space image, and the space images
 // of before.
 //

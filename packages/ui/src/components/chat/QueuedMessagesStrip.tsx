@@ -53,7 +53,7 @@ const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, on
             <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                 {firstLine ? withAttachmentChips(firstLine, attachmentFilenames, `queued-${message.id}`) : t('chat.queuedMessage.empty')}
                 {attachmentCount > 0 && (
-                    <span className="ml-1 text-muted-foreground">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
+                    <span className="ms-1 text-muted-foreground">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
                 )}
             </span>
             {!message.scheduledTask ? (
@@ -98,7 +98,7 @@ const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, on
     );
 };
 
-const ROW_CLASS = 'flex h-10 min-w-0 items-center gap-2 pl-3 pr-1.5';
+const ROW_CLASS = 'flex h-10 min-w-0 items-center gap-2 ps-3 pe-1.5';
 
 const SortableQueuedMessageRow = memo((props: Omit<QueuedMessageRowProps, 'lead'>) => {
     const { t } = useI18n();
@@ -219,7 +219,7 @@ export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage 
     // The whole header toggles the list, as the background commands header does.
     return (
         <div role="group" className="border-b border-border/60" aria-label={t('chat.queuedMessage.title')}>
-            <div className="flex h-10 items-center pl-3 pr-3">
+            <div className="flex h-10 items-center ps-3 pe-3">
                 <Button
                     type="button"
                     variant="ghost"
@@ -231,7 +231,7 @@ export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage 
                     className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
                 >
                     <Icon name="time" className="size-3.5 shrink-0" aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate text-left">
+                    <span className="min-w-0 flex-1 truncate text-start">
                         {t('chat.queuedMessage.title')} {queuedMessages.length}
                     </span>
                     <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />

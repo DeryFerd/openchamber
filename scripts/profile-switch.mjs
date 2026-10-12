@@ -31,15 +31,17 @@
  */
 
 import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import process from "node:process"
 
-import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
+import { ACCESSIBILITY_CATEGORY, accessibilityInWindow, accessibilityState, describeAccessibility, FORCE_ACCESSIBILITY_ARGS } from "./perf/accessibility.mjs"
+import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "./perf/cdp.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
 import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
 import { percentile, round } from "./perf/metrics.mjs"
 import { createNetworkRecorder, endpointPattern, summarizeRequests } from "./perf/network.mjs"
+import { buildRenderProbeSource, printRenderProbe, readRenderProbe, RENDER_PROBE_GLOBAL, summarizeRenderProbe } from "./perf/render-probe.mjs"
+import { rendererMainThread } from "./perf/trace-analysis.mjs"
 
 const HELP = `Usage: bun run profile:switch -- [options]
 
@@ -86,10 +88,28 @@ Options:
                            (for example, a script that moves content after the
                            reveal, to prove the shift metric reads it); the
                            summary is labelled as a modified app.
+  --render-probe           Count renders per component, renders that changed
+                           nothing in the DOM, store notifications and DOM
+                           mutations per region over the switches after the
+                           last page load (every switch without --cold-reload;
+                           the last cycle with it), per
+                           scripts/perf/render-probe.mjs. Writes
+                           render-probe.json. An attribution run: the probe
+                           adds work to every commit, so quote counts, not ms.
+  --render-probe-hook <Component:index>
+                           With --render-probe, record the call stacks that
+                           dispatch to this component's hook
+  --extra-categories <list> Comma-separated trace categories to add. The
+                           accessibility category is always recorded
+  --force-accessibility    Launch Chrome with its accessibility tree on, as an
+                           accessibility client turns it on (a screen reader,
+                           or a macOS app that reads other windows), so every
+                           machine and headless runs measure that case
   --chrome <path>          Chrome/Chromium executable
-  --profile-dir <path>     Chrome profile (default: ~/.cache/openchamber-perf-switch-profile).
-                           Its storage persists the sidebar and last session per
-                           origin, so give each compared build its own fresh one.
+  --profile-dir <path>     Chrome profile to reuse (default: a fresh temporary
+                           profile per run, removed afterwards). Its storage
+                           persists the sidebar and last session per origin, so
+                           give each compared build its own fresh one.
   --headless               Run without a visible browser
   --help                   Show this help
 
@@ -117,8 +137,12 @@ const parseArgs = (argv) => {
     budgetShift: null,
     label: null,
     injectScript: null,
+    renderProbe: false,
+    renderProbeHook: null,
+    extraCategories: [],
+    forceAccessibility: false,
     chrome: null,
-    profileDir: join(homedir(), ".cache", "openchamber-perf-switch-profile"),
+    profileDir: null,
     headless: false,
   }
   for (let index = 0; index < argv.length; index += 1) {
@@ -143,6 +167,10 @@ const parseArgs = (argv) => {
     else if (value === "--budget-shift") options.budgetShift = Number(argv[++index])
     else if (value === "--label") options.label = argv[++index]
     else if (value === "--inject-script") options.injectScript = argv[++index]
+    else if (value === "--render-probe") options.renderProbe = true
+    else if (value === "--render-probe-hook") options.renderProbeHook = argv[++index]
+    else if (value === "--extra-categories") options.extraCategories = String(argv[++index]).split(",").map((category) => category.trim()).filter(Boolean)
+    else if (value === "--force-accessibility") options.forceAccessibility = true
     else if (value === "--chrome") options.chrome = argv[++index]
     else if (value === "--profile-dir") options.profileDir = resolve(argv[++index])
     else if (value === "--headless") options.headless = true
@@ -338,6 +366,8 @@ const SWITCH_METRICS = {
   visible: (entry) => entry.visible,
   revealCleared: (entry) => entry.revealCleared,
   longestTask: (entry) => entry.longestTask,
+  accessibilityMs: (entry) => entry.accessibility?.ms ?? null,
+  accessibilityLongestPassMs: (entry) => entry.accessibility?.longestPassMs ?? null,
   requests: (entry) => entry.requestCount,
   decodedKb: (entry) => entry.network?.decodedKb ?? null,
   encodedKb: (entry) => entry.network?.encodedKb ?? null,
@@ -421,14 +451,14 @@ const main = async () => {
   const options = parseArgs(process.argv.slice(2))
   const output = resolve(options.output ?? join("artifacts", `switch-profile-${new Date().toISOString().replace(/[:.]/g, "-")}`))
   await mkdir(output, { recursive: true })
-  const profileDir = options.profileDir
+  const profile = resolveProfileDir(options.profileDir, "switch")
   const chrome = resolveChrome(options.chrome)
   const baseline = options.baseline
     ? JSON.parse(await readFile(join(resolve(options.baseline), "switch-summary.json"), "utf8"))
     : null
 
   const port = await reservePort()
-  const chromeProcess = launchChrome({ chrome, profileDir, port, headless: options.headless })
+  const chromeProcess = launchChrome({ chrome, profileDir: profile.dir, port, headless: options.headless, extraArgs: options.forceAccessibility ? FORCE_ACCESSIBILITY_ARGS : [] })
   let client
   try {
     const target = await createPageTarget(port)
@@ -449,6 +479,10 @@ const main = async () => {
     if (options.injectScript) {
       await client.send("Page.addScriptToEvaluateOnNewDocument", { source: await readFile(resolve(options.injectScript), "utf8") })
       console.log(`MODIFIED APP — injected script: ${options.injectScript}`)
+    }
+    if (options.renderProbe) {
+      await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildRenderProbeSource({ traceHook: options.renderProbeHook }) })
+      console.log("ATTRIBUTION RUN — render probe on; switch timings from this run are inflated.")
     }
     const network = createNetworkRecorder(client)
 
@@ -496,15 +530,22 @@ const main = async () => {
     client.on("Tracing.dataCollected", ({ value }) => { for (const event of value ?? []) traceEvents.push(event) })
     await client.send("Profiler.setSamplingInterval", { interval: 250 })
     await client.send("Profiler.start")
-    await client.send("Tracing.start", {
-      transferMode: "ReportEvents",
-      categories: ["devtools.timeline", "disabled-by-default-devtools.timeline", "blink.user_timing"].join(","),
-    })
+    const categories = [...new Set(["devtools.timeline", "disabled-by-default-devtools.timeline", "blink.user_timing", ACCESSIBILITY_CATEGORY, ...options.extraCategories])]
+    await client.send("Tracing.start", { transferMode: "ReportEvents", categories: categories.join(",") })
 
     const switches = []
     let index = 0
+    // A reload starts a fresh page and probe, so the probe covers the switches
+    // after the last load; without --cold-reload that is every switch.
+    const startRenderProbe = () => (options.renderProbe ? evaluateValue(client, `globalThis[${JSON.stringify(RENDER_PROBE_GLOBAL)}]?.start()`) : null)
+    await startRenderProbe()
+    let probedSwitches = 0
     for (let cycle = 0; cycle < options.repeat; cycle += 1) {
-      if (cycle > 0 && options.coldReload) await loadPage(park)
+      if (cycle > 0 && options.coldReload) {
+        await loadPage(park)
+        await startRenderProbe()
+        probedSwitches = 0
+      }
       if (cycle === 0 || options.coldReload) {
         const present = (await readSidebarRows(client)).map((row) => row.id)
         const gone = plan.filter((id) => !present.includes(id))
@@ -552,12 +593,15 @@ const main = async () => {
         const networkSummary = summarizeRequests(triggered, options.url)
         const entry = { index, cycle, id, visit, ...probe, requestCount: triggered.length, requests, network: networkSummary, renders, longestTask: null }
         switches.push(entry)
+        probedSwitches += 1
         const renderSummary = Object.entries(renders).map(([metric, count]) => `${metric.replace(/\.render$/, "")}=${count}`).join(" ")
         console.log(`#${String(index).padStart(2)} ${visit.padEnd(4)} ${id.slice(0, 16)} ack=${fmt(probe.ack)} content=${fmt(probe.content)} visible=${fmt(probe.visible)} shift=${probe.shift ? `${probe.shift.maxPx}px` : "-"} (${probe.messageCount ?? "-"} msgs) longestFrameGap=${fmt(probe.longestFrameGap)} requests=${triggered.length} ${networkSummary.decodedKb}KB ${renderSummary}`)
         index += 1
       }
     }
 
+    if (options.renderProbe) await evaluateValue(client, `globalThis[${JSON.stringify(RENDER_PROBE_GLOBAL)}]?.stop()`)
+    const renderProbeRaw = options.renderProbe ? await readRenderProbe((expression) => evaluateValue(client, expression)) : null
     const tracingComplete = client.once("Tracing.tracingComplete", 120_000)
     await client.send("Tracing.end")
     await tracingComplete
@@ -576,6 +620,7 @@ const main = async () => {
       const end = marks[markIndex + 1].ts
       const longest = tasks.filter((event) => event.ts >= start && event.ts <= end).reduce((max, event) => Math.max(max, event.dur / 1000), 0)
       switches[switchIndex].longestTask = tasks.length === 0 ? null : round(longest)
+      switches[switchIndex].accessibility = accessibilityInWindow(traceEvents, { main: rendererMainThread(traceEvents, { start, end }).main, start, end, recorded: true })
       switchIndex += 1
     }
 
@@ -592,6 +637,7 @@ const main = async () => {
       recordedAt: new Date().toISOString(),
       label: options.label,
       injectedScript: options.injectScript,
+      renderProbe: renderProbeRaw ? { ...summarizeRenderProbe(JSON.parse(renderProbeRaw)), switches: probedSwitches } : null,
       url: options.url,
       sessions: plan,
       park,
@@ -599,6 +645,7 @@ const main = async () => {
       coldReload: options.coldReload,
       shiftWindowMs: options.shiftWindow,
       frameLiveness,
+      accessibility: accessibilityState(traceEvents, { categories, forced: options.forceAccessibility }),
       ...summarizeSwitches(switches, titles),
       switches,
       cpuProfile: summarizeCpuProfile(profile),
@@ -606,15 +653,16 @@ const main = async () => {
     await writeFile(join(output, "switch-summary.json"), JSON.stringify(summary, null, 2))
     await writeFile(join(output, "trace.json"), JSON.stringify({ traceEvents }))
     await writeFile(join(output, "cpu-profile.cpuprofile"), JSON.stringify(profile))
+    if (renderProbeRaw) await writeFile(join(output, "render-probe.json"), renderProbeRaw)
 
-    console.log("")
+    console.log(`\n${describeAccessibility(summary.accessibility)}`)
     const line = (label, value, unit = "ms") => (value ? `${label} ${value.median}${unit} (p95 ${value.p95})` : `${label} -`)
     for (const visit of ["cold", "warm"]) {
       const visitStats = summary[visit]
       if (!visitStats) continue
       console.log(`${visit} (${visitStats.switches}): ${[
         line("ack", visitStats.ack), line("content", visitStats.content), line("visible", visitStats.visible),
-        line("shift", visitStats.shiftMaxPx, "px"), line("longest task", visitStats.longestTask),
+        line("shift", visitStats.shiftMaxPx, "px"), line("longest task", visitStats.longestTask), line("accessibility", visitStats.accessibilityMs),
         line("requests", visitStats.requests, ""), line("decoded", visitStats.decodedKb, "KB"),
       ].join(" · ")}`)
       if (visitStats.notVisible > 0) console.log(`  ${visitStats.notVisible} switch(es) showed content that never became fully visible`)
@@ -624,6 +672,7 @@ const main = async () => {
       console.log(`  ${id.slice(0, 20)} ${String(session.messageCount).padStart(4)} msgs  cold: ${describe(session.cold)}  warm: ${describe(session.warm)}`)
     }
     if (summary.invalidSwitches > 0) console.warn(`Warning: ${summary.invalidSwitches} switch(es) never acknowledged or never showed content; they are excluded from the statistics.`)
+    if (summary.renderProbe) printRenderProbe(summary.renderProbe, { perUnit: { label: "switch", count: probedSwitches } })
     if (baseline) printComparison(summary, baseline)
     console.log(`Artifacts written to ${output}`)
 
@@ -642,6 +691,7 @@ const main = async () => {
   } finally {
     client?.close()
     chromeProcess.kill()
+    profile.removeAfter(chromeProcess)
   }
 }
 

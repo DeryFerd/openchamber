@@ -2,7 +2,7 @@ import { create, type StoreApi } from "zustand"
 import type { DirState, State } from "./types"
 import { INITIAL_STATE, MAX_DIR_STORES, DIR_IDLE_TTL_MS, EVICTION_GRACE_MS } from "./types"
 import { pickDirectoriesToEvict, canDisposeDirectory, hasPendingBlockingRequests } from "./eviction"
-import { readDirCache, persistVcs, persistProjectMeta, persistIcon, persistSessions } from "./persist-cache"
+import { forgetDirCache, readDirCache, persistVcs, persistProjectMeta, persistIcon, persistSessions } from "./persist-cache"
 import { normalizePath } from "@/lib/pathNormalization"
 import { startSessionLoadPerformanceEvent } from "./session-load-performance"
 import { countSyncPerformance } from "./performance-diagnostics"
@@ -288,14 +288,16 @@ function ownsAnySession(state: State, sessionIDs: ReadonlySet<string>): boolean 
   return Object.keys(state.session_status ?? {}).some((sessionID) => sessionIDs.has(sessionID))
 }
 
-function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
+function createDirectoryStore(directory: string, seedSessions: boolean): StoreApi<DirectoryStore> {
   // Restore cached metadata from localStorage
   const cached = readDirCache(directory)
 
   // Stale-while-revalidate: seed the session list from cache so the sidebar
   // paints chats instantly. Bootstrap replaces it with the authoritative list
   // while preserving session mutations that happened after the request began.
-  const cachedSessions = cached.sessions ?? INITIAL_STATE.session
+  // A directory the owner says not to seed, an isolated space this window does
+  // not know among them, starts empty and waits for the authoritative list.
+  const cachedSessions = (seedSessions ? cached.sessions : undefined) ?? INITIAL_STATE.session
 
   const store = create<DirectoryStore>()((set) => ({
     ...INITIAL_STATE,
@@ -344,6 +346,12 @@ export class ChildStoreManager {
 
   private onBootstrap?: (context: DirectoryBootstrapContext) => Promise<void> | void
   private onDispose?: (directory: string) => void
+  /**
+   * Whether a new store of a directory may seed its session list from the persisted cache;
+   * every directory may when unset. Given at construction, so no store, a consumer's during
+   * the first render included, is made without it.
+   */
+  private readonly seedsSessions?: (directory: string) => boolean
   private isBooting?: (directory: string) => boolean
   private isLoadingSessions?: (directory: string) => boolean
   private isCurrentScope?: () => boolean
@@ -354,6 +362,10 @@ export class ChildStoreManager {
   private readonly directoryBootstrapRuns = new Map<string, number>()
   private manualBootstrapDemandRevision = 0
   private disposed = false
+
+  constructor(options: { seedsSessions?: (directory: string) => boolean } = {}) {
+    this.seedsSessions = options.seedsSessions
+  }
 
   private notifyRegistrySubscribers() {
     for (const subscriber of this.registrySubscribers) {
@@ -467,7 +479,7 @@ export class ChildStoreManager {
 
     let store = this.children.get(normalizedDirectory)
     if (!store) {
-      store = createDirectoryStore(normalizedDirectory)
+      store = createDirectoryStore(normalizedDirectory, this.seedsSessions?.(normalizedDirectory) ?? true)
       this.children.set(normalizedDirectory, store)
       this.notifyRegistrySubscribers()
     }
@@ -862,6 +874,23 @@ export class ChildStoreManager {
       finish("error")
       this.notifyBootstrapSubscribers()
     })
+  }
+
+  /**
+   * A directory the host no longer has, an isolated space that was deleted among them: its
+   * store lists nothing, its persisted cache goes, and the store is disposed once nothing in
+   * this window holds it. A consumer still mounted on it keeps an empty store, as the host's
+   * own answer would leave it.
+   */
+  forgetDirectory(directory: string): void {
+    const normalizedDirectory = normalizePath(directory)
+    if (!normalizedDirectory) return
+    const store = this.children.get(normalizedDirectory)
+    if (store && store.getState().session.length > 0) {
+      store.setState({ session: [], sessionTotal: 0, sessionListSource: "empty" })
+    }
+    forgetDirCache(normalizedDirectory)
+    this.disposeDirectory(normalizedDirectory)
   }
 
   disposeDirectory(directory: string): boolean {

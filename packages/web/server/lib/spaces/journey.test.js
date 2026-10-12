@@ -10,9 +10,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { SpaceError } from './errors.js';
 import { createSpaceJourney } from './journey.js';
-import { ROLE_GATEKEEPER, spaceResourceName } from './labels.js';
+import { createLoginKeeper } from './login-keeper.js';
+import { ROLE_GATEKEEPER, hashProjectDirectory, spaceResourceName } from './labels.js';
 import { IMAGE_TIMEOUT } from './layout.js';
-import { createSpaceManager } from './manager.js';
+import { PLACE_RETRY_CAP_MS, createSpaceManager } from './manager.js';
 import { createMemoryPlace } from './places/memory-place.js';
 import { createPlaceRegistry } from './places/registry.js';
 import { createSpaceRecords } from './space-records.js';
@@ -34,7 +35,7 @@ afterEach(() => {
 });
 
 /** A journey on fresh stand-ins. `failAt` names a stand-in step that rejects. */
-const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet } = {}) => {
+const journeyWith = ({ readHostLogin = null, failAt = null, place = createMemoryPlace(), morePlaces = [], projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet, resolveDirectory = undefined } = {}) => {
   // With `holdCodeIn`, code in waits until the test lets it go, so a creation stays under way;
   // `holdCodeOut` does the same for the fetch of an apply.
   let releaseCodeIn = () => {};
@@ -79,7 +80,7 @@ const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [P
   const spaceOpenCode = {
     writeProviderConfig: async (spaceId, grants) => { calls.push(['writeProviderConfig', spaceId, grants]); fail('writeProviderConfig'); },
     writeLogin: async (spaceId, provider, login) => { calls.push(['writeLogin', spaceId, provider, login]); if (holdLoginRow) await loginRowHeld; fail('writeLogin'); },
-    removeLogin: async (spaceId) => { calls.push(['removeLogin', spaceId]); if (holdLoginRow) await loginRowHeld; fail('removeLogin'); },
+    removeLogin: async (spaceId, provider) => { calls.push(['removeLogin', spaceId, provider]); if (holdLoginRow) await loginRowHeld; fail('removeLogin'); },
   };
   const codeIn = {
     bringCodeIn: async (request) => {
@@ -102,22 +103,31 @@ const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [P
     applyAsChanges: async (request) => { calls.push(['applyAsChanges', request]); fail('applyAsChanges'); return { status: failAt === 'nothing' ? 'nothing_to_apply' : 'applied', appliedPaths: 3, remembered: true }; },
   };
   const records = createSpaceRecords({ dataDir, logger: quiet });
-  const manager = createSpaceManager({ registry: createPlaceRegistry([place]), now: () => new Date('2026-09-26T10:00:00.000Z') });
+  // The clock of the manager and the journey; a test moves it to get past the manager's pause on a failed place.
+  const clock = { time: Date.parse('2026-09-26T10:00:00.000Z') };
+  const places = createPlaceRegistry([place, ...morePlaces]);
+  const manager = createSpaceManager({
+    registry: places,
+    locate: async (spaceId) => records.read(spaceId).record?.placeId ?? null,
+    recall: async () => records.list().map(({ id, record }) => ({ placeId: record.placeId, id, name: record.name ?? id, project: hashProjectDirectory(record.repository), created: record.created ?? '' })),
+    now: () => new Date(clock.time),
+  });
   const journey = createSpaceJourney({
-    manager, place, gatekeeper, codeIn, codeOut, records, spaceOpenCode, serverInside, restartOpenCodeInside,
+    manager, places, gatekeeper, codeIn, codeOut, records, spaceOpenCode, serverInside, restartOpenCodeInside,
     listProjectDirectories: async () => projects,
     archiveChats,
     readHostSecret: (name) => hostEnvironment[name],
-    readHostLogin: async (provider) => (hostLogin && provider === 'openai' ? hostLogin : null),
+    readHostLogin: readHostLogin ?? (async (provider) => (hostLogin && provider === 'openai' ? hostLogin : null)),
     folderExists: async () => true,
+    resolveDirectory,
     readIdleStop: async () => idle.saved ?? { enabled: true, hours: 4 },
     saveIdleStop: async (setting) => { if (holdIdleSave) await idleSaveHeld; fail('saveIdleStop'); idle.saved = setting; },
     announce: (spaceId, payload) => { events.push({ spaceId, ...payload.properties }); },
     onSpacesChanged: () => { changes.count += 1; },
     logger,
-    now: () => new Date('2026-09-26T10:00:00.000Z'),
+    now: () => new Date(clock.time),
   });
-  return { journey, place, records, calls, events, changes, manager, releaseCodeIn, releaseCodeOut, releaseReady, releaseLoginRow, gatekeeper, dataDir, idle };
+  return { journey, place, records, calls, events, changes, manager, releaseCodeIn, releaseCodeOut, releaseReady, releaseLoginRow, gatekeeper, dataDir, idle, clock };
 };
 
 const REQUEST = { projectDirectory: PROJECT, name: ' Fix login ', start: 'uncommitted', network: NETWORK };
@@ -194,6 +204,17 @@ describe('the journey: create', () => {
     expect(await until(() => steps(events, open.id).includes('ready'))).toBe(true);
   });
 
+  it('takes the project folder in the UI\'s spelling and makes the space for the folder the settings name', async () => {
+    // On Windows the UI sends forward slashes and the settings keep backslashes.
+    const registered = 'C:\\Users\\me\\project';
+    const { journey, events, records } = journeyWith({ projects: [registered], resolveDirectory: path.win32.resolve });
+    const space = await journey.createSpace({ ...REQUEST, projectDirectory: 'C:/Users/me/project/' });
+    expect(space.projectDirectory).toBe(registered);
+    expect(await until(() => steps(events, space.id).includes('ready'))).toBe(true);
+    expect(records.read(space.id).record.repository).toBe(registered);
+    await expect(journey.createSpace({ ...REQUEST, projectDirectory: 'C:/Users/me/other' })).rejects.toMatchObject({ code: 'project_not_registered' });
+  });
+
   it('refuses a bad request before anything runs', async () => {
     const { journey, place, events } = journeyWith();
     await expect(journey.createSpace({ ...REQUEST, projectDirectory: '/home/me/other' })).rejects.toMatchObject({ code: 'project_not_registered' });
@@ -205,6 +226,105 @@ describe('the journey: create', () => {
     await expect(journey.createSpace({ ...REQUEST, name: 7 })).rejects.toMatchObject({ code: 'invalid_space_name' });
     expect(events).toEqual([]);
     expect(await place.list()).toEqual([]);
+  });
+});
+
+describe('the journey: two places', () => {
+  const remote = () => ({ ...createMemoryPlace({ id: 'remote' }), machine: 'box' });
+
+  it('makes a space on the place the request names, remembers it in the record, and routes its actions there', async () => {
+    const second = remote();
+    const { journey, place, records, events } = journeyWith({ morePlaces: [second] });
+    const { id, placeId } = await journey.createSpace({ ...REQUEST, placeId: 'remote' });
+    expect(placeId).toBe('remote');
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    expect(records.read(id).record).toMatchObject({ placeId: 'remote', name: 'Fix login', created: '2026-09-26T10:00:00.000Z' });
+    expect(await place.list()).toEqual([]);
+    expect((await second.list()).map((space) => space.id)).toEqual([id]);
+    expect((await journey.listSpaces())[0]).toMatchObject({ id, placeId: 'remote', state: 'running' });
+    await journey.stopSpace(id);
+    expect((await second.list())[0].state).toBe('exited');
+    await journey.startSpace(id);
+    expect((await second.list())[0].state).toBe('running');
+    expect(await journey.removeSpace(id)).toMatchObject({ removed: true });
+    expect(await second.list()).toEqual([]);
+  });
+
+  it('lists a space whose place is no longer configured as unreachable, and a delete forgets its record and nothing else', async () => {
+    const { journey, records, place } = journeyWith();
+    records.write('c1c2c3d4e5f6', { placeId: 'cluster', name: 'Elsewhere', created: '2026-10-11T10:00:00.000Z', network: { mode: 'open' }, repository: PROJECT, spacePath: '/spaces/c1c2c3d4e5f6/project' });
+    // Its place is gone, so no machine is known, and the failure says a delete would forget the record.
+    expect((await journey.listSpaces())[0]).toMatchObject({ id: 'c1c2c3d4e5f6', placeId: 'cluster', machine: null, name: 'Elsewhere', state: 'unreachable', failure: { code: 'place_not_found' } });
+    const gone = await journey.removeSpace('c1c2c3d4e5f6', { allowUnsaved: true });
+    expect(gone).toMatchObject({ removed: false, failures: [{ code: 'place_not_found' }] });
+    expect(records.read('c1c2c3d4e5f6')).toEqual({ status: 'missing', record: null });
+    expect(await journey.listSpaces()).toEqual([]);
+    expect(await place.list()).toEqual([]);
+  });
+
+  it('takes the first place when the request names none, and refuses a place it does not have', async () => {
+    const { journey, place, events } = journeyWith({ morePlaces: [remote()] });
+    const { id, placeId } = await journey.createSpace(REQUEST);
+    expect(placeId).toBe('memory');
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    expect((await place.list()).map((space) => space.id)).toEqual([id]);
+    await expect(journey.createSpace({ ...REQUEST, placeId: 'cluster' })).rejects.toMatchObject({ code: 'place_not_found' });
+  });
+
+  it('is idle only while no creation and no action is under way; a failed creation does not hold it', async () => {
+    const { journey, events, releaseCodeIn } = journeyWith({ holdCodeIn: true });
+    expect(journey.isIdle()).toBe(true);
+    const { id } = await journey.createSpace(REQUEST);
+    expect(journey.isIdle()).toBe(false);
+    releaseCodeIn();
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    expect(journey.isIdle()).toBe(true);
+    const failing = journeyWith({ failAt: 'setNetwork' });
+    const failed = await failing.journey.createSpace(REQUEST);
+    expect(await until(() => steps(failing.events, failed.id).includes('failed'))).toBe(true);
+    expect(failing.journey.isIdle()).toBe(true);
+  });
+
+  it('keeps listing the spaces of a place that cannot be asked, as unreachable, from the records', async () => {
+    const second = remote();
+    const logs = [];
+    const { journey, events, records, clock } = journeyWith({ morePlaces: [second], logger: { warn: (line) => logs.push(line), info: (line) => logs.push(line) } });
+    const local = await journey.createSpace(REQUEST);
+    const away = await journey.createSpace({ ...REQUEST, name: 'On the box', placeId: 'remote' });
+    expect(await until(() => steps(events, local.id).includes('ready') && steps(events, away.id).includes('ready'))).toBe(true);
+    const { list: answer, remove: removal } = second;
+    second.list = async () => { throw new SpaceError('place_unreachable', 'box did not answer'); };
+    second.remove = async () => { throw new SpaceError('place_unreachable', 'box did not answer'); };
+
+    const listed = await journey.listSpaces();
+    expect(listed.map(({ id, placeId, state }) => [id, placeId, state])).toEqual([[local.id, 'memory', 'running'], [away.id, 'remote', 'unreachable']]);
+    // The machine of the place, and the place's failure, so the group can say why the space is out of reach.
+    expect(listed[1]).toMatchObject({ name: 'On the box', machine: 'box', projectDirectory: PROJECT, directory: `/spaces/${away.id}/project`, network: NETWORK, step: null, failure: { code: 'place_unreachable', message: 'box did not answer' }, damaged: false });
+    expect(listed[0].machine).toBeNull();
+    expect(logs.filter((line) => line.includes('cannot be asked'))).toHaveLength(1);
+    await journey.listSpaces();
+    expect(logs.filter((line) => line.includes('cannot be asked'))).toHaveLength(1);
+    expect(records.read(away.id).status).toBe('ok');
+
+    // The switch cannot stop what it cannot reach, and says so.
+    const turned = await journey.stopAllSpaces();
+    expect(turned.stopped).toEqual([{ id: local.id, name: 'Fix login' }]);
+    expect(turned.stillRunning).toEqual([{ id: away.id, name: 'On the box', code: 'place_unreachable', message: 'box did not answer', details: null }]);
+    expect(turned.unknown).toMatchObject({ code: 'place_unreachable' });
+    journey.reopen();
+
+    // A delete while the machine is away removes nothing and keeps the record, so the space stays listed.
+    const refused = await journey.removeSpace(away.id, { allowUnsaved: true });
+    expect(refused).toMatchObject({ removed: false, failures: [{ code: 'place_unreachable' }] });
+    expect(records.read(away.id).status).toBe('ok');
+    expect((await journey.listSpaces()).find((space) => space.id === away.id)).toMatchObject({ state: 'unreachable' });
+
+    // Back, once the pause between attempts is over: the place's own list is the truth again.
+    second.list = answer;
+    second.remove = removal;
+    clock.time += PLACE_RETRY_CAP_MS;
+    expect((await journey.listSpaces()).find((space) => space.id === away.id)).toMatchObject({ state: 'running' });
+    expect(logs.filter((line) => line.includes('answers again'))).toHaveLength(1);
   });
 });
 
@@ -372,10 +492,11 @@ describe('the journey: start, stop, remove', () => {
     expect((await place.list()).map((space) => space.state).sort()).toEqual(['exited', 'exited', 'running']);
   });
 
-  it('turns off without the list when the place cannot give one, and says it does not know what runs', async () => {
-    const { journey, place } = await ready();
+  it('turns off without the list when the place cannot give one, reports the spaces it remembers there as not stopped, and says it does not know what else runs', async () => {
+    const { journey, place, id } = await ready();
     place.list = async () => { throw new SpaceError('docker_command_failed', 'docker ps exited 1'); };
-    expect(await journey.stopAllSpaces()).toEqual({ stopped: [], stillRunning: [], unknown: { code: 'docker_command_failed', message: 'docker ps exited 1', details: null } });
+    const failure = { code: 'docker_command_failed', message: 'docker ps exited 1', details: null };
+    expect(await journey.stopAllSpaces()).toEqual({ stopped: [], stillRunning: [{ id, name: 'Fix login', ...failure }], unknown: failure });
     await expect(journey.createSpace(REQUEST)).rejects.toMatchObject({ code: 'isolated_spaces_off' });
   });
 
@@ -771,6 +892,51 @@ describe('the journey: grants', () => {
       }
     });
 
+    it('tells the dialogs which logins the host has, without the token: usable, run out, made another way, or none', async () => {
+      const usable = await ready({ hostLogin: tokenSharing });
+      expect(await usable.journey.readHostLogins()).toEqual({ logins: [{ provider: 'openai', method: 'chatgpt-token-sharing', expires: '2026-09-26T11:00:00.000Z', state: 'usable' }] });
+      expect(JSON.stringify(await usable.journey.readHostLogins())).not.toContain(ACCESS);
+      const ended = await ready({ hostLogin: { ...tokenSharing, expires: Date.parse('2026-09-26T09:59:00.000Z') } });
+      expect(await ended.journey.readHostLogins()).toEqual({ logins: [expect.objectContaining({ provider: 'openai', state: 'expired' })] });
+      const other = await ready({ hostLogin: { ...legacy, methodID: 'some-new-method' } });
+      expect(await other.journey.readHostLogins()).toEqual({ logins: [expect.objectContaining({ provider: 'openai', method: 'some-new-method', state: 'unsupported' })] });
+      const none = await ready();
+      expect(await none.journey.readHostLogins()).toEqual({ logins: [] });
+      // A host whose OpenCode cannot be asked is a failure, never "signed out".
+      const broken = journeyWith({ readHostLogin: async () => { throw new Error('OpenCode is not connected yet'); } });
+      await expect(broken.journey.readHostLogins()).rejects.toThrow('OpenCode is not connected yet');
+    });
+
+    describe('a Copilot login', () => {
+      const GITHUB_TOKEN = 'gho_live_github_token_of_the_host';
+      const copilot = { methodID: 'device', access: GITHUB_TOKEN, expires: 0, metadata: { apiEndpoint: 'https://api.individual.githubcopilot.com' } };
+      const asked = { kind: 'login', provider: 'github-copilot' };
+      const readHostLogin = async (provider) => (provider === 'github-copilot' ? copilot : null);
+
+      it('is usable without an end, goes to the gatekeeper at the address GitHub gave, is remembered as its method, and is said again after a start', async () => {
+        const { journey, calls, records, dataDir, id, gatekeeper } = await ready({ readHostLogin });
+        expect(await journey.readHostLogins()).toEqual({ logins: [{ provider: 'github-copilot', method: 'device', expires: null, state: 'usable' }] });
+        const granted = await journey.grantAccess(id, asked);
+        expect(granted).toEqual({ grant: { kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device', url: 'http://gatekeeper:8080/model/github-copilot' } });
+        expect(calls).toEqual([
+          ['addGrant', id, { id: 'github-copilot', upstream: 'https://api.individual.githubcopilot.com', header: 'authorization', secret: GITHUB_TOKEN }],
+          ['writeProviderConfig', id, [{ kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device' }]],
+          ['writeLogin', id, 'github-copilot', copilot],
+        ]);
+        expect(fs.readFileSync(path.join(dataDir, 'spaces', 'records', `${id}.json`), 'utf8')).not.toContain(GITHUB_TOKEN);
+        expect(records.read(id).record.grants).toEqual([{ kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device' }]);
+        expect((await journey.listSpaces({ access: true }))[0]).toMatchObject({ access: 'granted' });
+        // Said again after a start: a token with no end never runs out.
+        await journey.stopSpace(id);
+        gatekeeper.forget(id);
+        calls.splice(0);
+        expect(await journey.startSpace(id)).toMatchObject({ grantsRestored: ['github-copilot'], needsAccess: [] });
+        expect(calls.filter(([name]) => name === 'addGrant')).toEqual([['addGrant', id, { id: 'github-copilot', upstream: 'https://api.individual.githubcopilot.com', header: 'authorization', secret: GITHUB_TOKEN }]]);
+        await until(() => calls.some(([name]) => name === 'writeLogin'));
+        expect(calls.filter(([name]) => name === 'writeLogin')).toEqual([['writeLogin', id, 'github-copilot', copilot]]);
+      });
+    });
+
     it('replaces a key with the login and the login with a key, taking the row inside with the login', async () => {
       const { journey, calls, records, id } = await ready({ hostLogin: tokenSharing, hostEnvironment: { OPENAI_API_KEY: ENV_KEY } });
       await journey.grantAccess(id, openai);
@@ -841,8 +1007,8 @@ describe('the journey: grants', () => {
       racing.calls.splice(0);
       await racing.journey.grantAccess(racing.id, openai);
       racing.releaseReady();
-      await until(() => racing.calls.filter(([name]) => name === 'removeLogin').length === 2);
-      expect(racing.calls.map(([name]) => name)).toEqual(['removeLogin', 'addGrant', 'writeProviderConfig', 'waitUntilReady', 'removeLogin']);
+      await until(() => racing.calls.filter(([name]) => name === 'removeLogin').length === 3);
+      expect(racing.calls.map(([name]) => name)).toEqual(['removeLogin', 'addGrant', 'writeProviderConfig', 'waitUntilReady', 'removeLogin', 'removeLogin']);
       expect(racing.records.read(racing.id).record.grants).toEqual([expect.objectContaining({ kind: 'model', id: 'openai' })]);
 
       // A key granted while the repair is writing the login row waits for that write and then
@@ -862,7 +1028,8 @@ describe('the journey: grants', () => {
       expect(held.calls).toEqual([]);
       held.releaseLoginRow();
       await granting;
-      expect(held.calls.map(([name]) => name)).toEqual(['removeLogin', 'addGrant', 'writeProviderConfig']);
+      // The repair ends by taking out the rows of the login providers the record does not hold, then the grant goes.
+      expect(held.calls.map(([name, , provider]) => (name === 'removeLogin' ? `removeLogin:${provider}` : name))).toEqual(['removeLogin:github-copilot', 'removeLogin:openai', 'addGrant', 'writeProviderConfig']);
 
       const silent = await ready({ hostLogin: tokenSharing, failAt: 'waitUntilReady' });
       await silent.journey.grantAccess(silent.id, login);
@@ -871,6 +1038,38 @@ describe('the journey: grants', () => {
       expect(await silent.journey.startSpace(silent.id)).toMatchObject({ state: 'running', grantsRestored: ['openai'] });
       await new Promise((resolve) => { setTimeout(resolve, 20); });
       expect(silent.calls.filter(([name]) => name === 'writeLogin' || name === 'removeLogin')).toEqual([]);
+    });
+
+    it('refuses an ended login the issuer would not renew as expired, read through the real keeper', async () => {
+      const ended = { ...tokenSharing, expires: Date.parse('2026-09-26T09:59:00.000Z') };
+      const keeper = createLoginKeeper({
+        readLogin: async (provider) => (provider === 'openai' ? ended : null),
+        renewLogin: async () => { throw Object.assign(new Error('The login issuer answered 401'), { code: 'login_refused' }); },
+        exchange: async () => ({}),
+        holders: async () => [],
+        say: async () => true,
+        now: () => Date.parse('2026-09-26T10:00:00.000Z'),
+        logger: quiet,
+      });
+      const made = await ready({ readHostLogin: keeper.fresh });
+      await expect(made.journey.grantAccess(made.id, login)).rejects.toMatchObject({ code: 'login_expired', message: expect.stringContaining('could not be renewed') });
+      expect(made.records.read(made.id).record.grants).toEqual([]);
+    });
+
+    it('says the login again for the keeper, the same window grant replaced, and leaves a space with an action under way to it', async () => {
+      const { journey, calls, id, releaseCodeOut } = await ready({ hostLogin: tokenSharing, holdCodeOut: true });
+      const grant = { kind: 'login', id: 'openai', provider: 'openai', method: 'chatgpt-token-sharing' };
+      const renewed = { ...tokenSharing, access: 'eyJ-renewed', expires: Date.parse('2026-09-26T12:00:00.000Z') };
+      await expect(journey.sayLogin(id, grant, renewed)).resolves.toBe(true);
+      expect(calls).toEqual([['addGrant', id, { id: 'openai', upstream: 'https://api.openai.com/v1', header: 'authorization', secret: 'eyJ-renewed' }]]);
+      calls.splice(0);
+      const preview = journey.previewApply(id);
+      await expect(journey.sayLogin(id, grant, renewed)).resolves.toBeNull();
+      expect(calls.filter(([name]) => name === 'addGrant')).toEqual([]);
+      releaseCodeOut();
+      await preview;
+      const refusing = await ready({ hostLogin: tokenSharing, failAt: 'addGrant' });
+      await expect(refusing.journey.sayLogin(refusing.id, grant, renewed)).resolves.toBe(false);
     });
 
     it('says a login a running gatekeeper lost again when the host starts', async () => {
@@ -1074,7 +1273,7 @@ describe('the journey: the project folder of a space', () => {
     const asked = [];
     // The record names the folder: a journey that no longer has the project still lists it.
     const unregistered = createSpaceJourney({
-      manager: first.manager, place: first.place, gatekeeper: first.gatekeeper, codeIn: {}, codeOut: {}, records: first.records,
+      manager: first.manager, places: createPlaceRegistry([first.place]), gatekeeper: first.gatekeeper, codeIn: {}, codeOut: {}, records: first.records,
       spaceOpenCode: {}, serverInside: {}, restartOpenCodeInside: async () => {},
       listProjectDirectories: async () => [],
       folderExists: async (directory) => { asked.push(directory); return false; },
@@ -1091,7 +1290,7 @@ describe('the journey: the project folder of a space', () => {
     fs.writeFileSync(file, '');
     const { first } = await made();
     const look = (directory) => createSpaceJourney({
-      manager: first.manager, place: first.place, gatekeeper: first.gatekeeper, codeIn: {}, codeOut: {}, records: { read: () => ({ record: { repository: directory } }) },
+      manager: first.manager, places: createPlaceRegistry([first.place]), gatekeeper: first.gatekeeper, codeIn: {}, codeOut: {}, records: { read: () => ({ record: { repository: directory } }) },
       spaceOpenCode: {}, serverInside: {}, restartOpenCodeInside: async () => {},
       listProjectDirectories: async () => [],
       logger: quiet,

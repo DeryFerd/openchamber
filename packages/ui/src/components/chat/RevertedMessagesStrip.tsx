@@ -30,7 +30,7 @@ const getRevertedPreview = (parts: Part[], fallback: string): string => {
     return filePart?.filename ? `[${filePart.filename}]` : fallback;
 };
 
-const ROW_CLASS = 'flex h-10 min-w-0 items-center gap-2 pl-3 pr-1.5';
+const ROW_CLASS = 'flex h-10 min-w-0 items-center gap-2 ps-3 pe-1.5';
 
 interface RevertedMessagesStripProps {
     sessionId: string | null;
@@ -115,7 +115,7 @@ export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React
     // Restore stays on it, so the decision never hides behind the toggle.
     return (
         <div role="group" className="border-b border-border/60" aria-label={t('chat.revertPopover.title')}>
-            <div className="flex h-10 items-center gap-2 pl-3 pr-1.5">
+            <div className="flex h-10 items-center gap-2 ps-3 pe-1.5">
                 <Button
                     type="button"
                     variant="ghost"
@@ -127,7 +127,7 @@ export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React
                     className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
                 >
                     <Icon name="arrow-go-back" className="size-3.5 shrink-0" aria-hidden="true" />
-                    <span className="min-w-0 truncate text-left">
+                    <span className="min-w-0 truncate text-start">
                         {t('chat.revertPopover.staged', { count: items.length })}
                     </span>
                     <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />

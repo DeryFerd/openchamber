@@ -1,13 +1,13 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
   "type": "module",
   "main": "./dist-bundle/entry.mjs",
   "opencodeCli": {
-    "version": "2.0.25"
+    "version": "2.0.27"
   },
   "dependencies": {
     "@openchamber/web": "workspace:*",
@@ -47,7 +47,7 @@
     "test": "node ../../scripts/run-isolated-tests.mjs .",
     "test:architecture": "node --test ./startup-url-selection.test.mjs ./menu-locales.test.mjs ./scripts/target-architecture.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs ./scripts/ensure-electron.test.mjs",
     "test:updater": "node --test ./updater-capability.test.mjs ./updater-channel.test.mjs ./updater-check.test.mjs ./updater-feed.test.mjs ./scripts/finalize-latest-yml.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
-    "test:linux-desktop": "node --test ./linux-autostart.test.mjs && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",
+    "test:linux-desktop": "node --test ./linux-autostart.test.mjs ./linux-desktop-entry.test.mjs && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
     "package": "bun run build:web-assets && bun run prepare:opencode-cli && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
@@ -68,7 +68,16 @@
       "dist-bundle/entry.mjs",
       "dist-bundle/main.mjs",
       "dist-bundle/early-startup.mjs",
-      "preload.mjs"
+      "preload.mjs",
+      "!**/node_modules/**/*.{ts,mts,cts,tsx,map}",
+      "!**/node_modules/**/!(LICENSE*|LICENCE*|license*|licence*|License*).md",
+      "!**/node_modules/bun-pty{,/**}",
+      "!**/node_modules/luxon/{src,build/amd,build/global,build/cjs-browser}{,/**}",
+      "!node_modules/@openchamber/web/{dist,src,public,scripts,test}{,/**}",
+      "!node_modules/@openchamber/web/*.{html,tgz}",
+      "!node_modules/@openchamber/web/{tsconfig.json,tsconfig.tsbuildinfo}",
+      "!node_modules/@openchamber/web/server/**/*.test.js",
+      "!node_modules/node-pty/prebuilds/!(${platform}-${arch}){,/**}"
     ],
     "extraResources": [
       {
@@ -130,7 +139,7 @@
         "AppImage"
       ],
       "category": "Development",
-      "icon": "resources/icons/app-icon.svg",
+      "icon": "resources/icons/app-icon.png",
       "executableName": "openchamber",
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "desktop": {

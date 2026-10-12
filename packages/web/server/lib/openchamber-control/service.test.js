@@ -234,6 +234,35 @@ describe('OpenChamber control service', () => {
     expect(sessionService.send).toHaveBeenCalledWith('ses_target', { directory: '/repo/worktrees/target', prompt: 'Continue' });
   });
 
+  it('moves the calling session into a worktree from the directory the call came from', async () => {
+    const moveToWorktree = vi.fn(async () => ({ sessionId: 'ses_me', directory: '/repo/worktrees/fix' }));
+    const { service } = createService({ sessionService: { moveToWorktree } });
+
+    const result = await service.execute('session.moveToWorktree', { worktree: ' fix ', branch: 'iuliia/fix' }, '/repo', { contextSessionId: 'ses_me' });
+
+    expect(result).toEqual({ sessionId: 'ses_me', directory: '/repo/worktrees/fix' });
+    expect(moveToWorktree).toHaveBeenCalledWith('ses_me', {
+      directory: '/repo',
+      worktree: { name: 'fix', branchName: 'iuliia/fix' },
+    });
+  });
+
+  it('moves a named session from where that session lives', async () => {
+    const moveToWorktree = vi.fn(async () => ({}));
+    const { service, client } = createService({ sessionService: { moveToWorktree } });
+    client.session.list.mockResolvedValue({ data: [{ id: 'ses_other', location: { directory: '/repo/worktrees/other' } }] });
+
+    // A directory of the caller's choosing is ignored: the changes come from where the session lives.
+    await service.execute('session.moveToWorktree', { sessionId: 'ses_other', worktree: 'fix', startRef: 'develop', directory: '/elsewhere' }, '/repo', { contextSessionId: 'ses_me' });
+    await expect(service.execute('session.moveToWorktree', { worktree: 'fix' }, '/repo')).rejects.toThrow('sessionId is required');
+
+    expect(moveToWorktree).toHaveBeenCalledWith('ses_other', {
+      directory: '/repo/worktrees/other',
+      worktree: { name: 'fix', startRef: 'develop' },
+    });
+    expect(moveToWorktree).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to the context directory when the session is not in the global list', async () => {
     const { service, sessionService } = createService();
     sessionService.send.mockResolvedValue({ sessionId: 'ses_unknown', directory: '/repo', promptDispatched: true });

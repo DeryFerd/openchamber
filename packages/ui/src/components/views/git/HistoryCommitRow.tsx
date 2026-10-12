@@ -350,7 +350,7 @@ export const HistoryCommitRow = React.memo(({
         type="button"
         onClick={onToggle}
         className={cn(
-          'w-full flex items-start gap-3 px-3 py-2 text-left transition-colors',
+          'w-full flex items-start gap-3 px-3 py-2 text-start transition-colors',
           isGraphMode
             ? 'hover:bg-[var(--interactive-hover)]/40'
             : isExpanded ? 'bg-sidebar/90' : 'hover:bg-sidebar/40'
@@ -428,7 +428,7 @@ export const HistoryCommitRow = React.memo(({
       </button>
 
       {isExpanded && (
-        <div className="px-3 pb-2 pl-8 border-t border-border/40">
+        <div className="px-3 pb-2 ps-8 border-t border-border/40">
           {/* Action buttons */}
           {isGraphMode && pendingAction ? (
             /* Confirmation banner — replaces the button row while an action is pending */
@@ -442,7 +442,7 @@ export const HistoryCommitRow = React.memo(({
                 onClick={(e) => { e.stopPropagation(); void confirmPendingAction(); }}
               >
                 {actionLoading !== null
-                  ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
+                  ? <Icon name="loader-4" className="size-3 animate-spin me-1" />
                   : null}
                 {t('gitView.history.actions.confirmButton')}
               </Button>
@@ -480,7 +480,7 @@ export const HistoryCommitRow = React.memo(({
                     onClick={(e) => { e.stopPropagation(); void handleCreateBranch(); }}
                   >
                     {actionLoading === 'createBranch'
-                      ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
+                      ? <Icon name="loader-4" className="size-3 animate-spin me-1" />
                       : null}
                     {t('gitView.history.actions.createBranchConfirm')}
                   </Button>
@@ -518,7 +518,7 @@ export const HistoryCommitRow = React.memo(({
                     onClick={(e) => e.stopPropagation()}
                   >
                     {actionLoading === 'reset'
-                      ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
+                      ? <Icon name="loader-4" className="size-3 animate-spin me-1" />
                       : null}
                     {t('gitView.history.actions.reset')}
                   </Button>
@@ -570,7 +570,7 @@ export const HistoryCommitRow = React.memo(({
                     type="button"
                     onClick={() => toggleFileDiff(file)}
                     className={cn(
-                      'w-full flex items-center gap-2 typography-micro text-left cursor-pointer transition-colors rounded px-1',
+                      'w-full flex items-center gap-2 typography-micro text-start cursor-pointer transition-colors rounded px-1',
                       openDiffPaths.has(file.path) ? 'bg-sidebar/90' : 'hover:bg-sidebar/40'
                     )}
                   >
@@ -649,7 +649,7 @@ export const HistoryCommitRow = React.memo(({
                             <button
                               type="button"
                               onClick={() => toggleFileDiff(file)}
-                              className="w-full text-left px-3 py-2 text-sm text-muted-foreground hover:bg-[var(--interactive-hover)] transition-colors"
+                              className="w-full text-start px-3 py-2 text-sm text-muted-foreground hover:bg-[var(--interactive-hover)] transition-colors"
                             >
                               {t('gitView.history.diffError')}
                             </button>

@@ -42,7 +42,6 @@ const turnEntry = (assistant: ChatMessageEntry): StreamingTailEntry => {
             assistantMessageIds: [assistant.info.id],
             assistantMessages: [assistant],
             activityParts: [],
-            activitySegments: [],
             summary: {},
             hasTools: false,
             hasReasoning: false,
@@ -58,7 +57,6 @@ describe('buildLiveStreamingEntry', () => {
 
         const next = buildLiveStreamingEntry(entry, {
             livePartsByMessageId: { assistant_other: [textPart('part_live', 'live')] },
-            showTextJustificationActivity: true,
             showTurnChangedFiles: false,
         });
 
@@ -72,7 +70,6 @@ describe('buildLiveStreamingEntry', () => {
 
         const next = buildLiveStreamingEntry(entry, {
             livePartsByMessageId: { assistant_1: liveParts },
-            showTextJustificationActivity: true,
             showTurnChangedFiles: false,
         });
 
@@ -94,7 +91,6 @@ describe('buildLiveStreamingEntry', () => {
 
         const next = buildLiveStreamingEntry(entry, {
             livePartsByMessageId: { assistant_1: liveParts },
-            showTextJustificationActivity: false,
             showTurnChangedFiles: false,
         });
 
@@ -115,7 +111,6 @@ describe('buildLiveStreamingEntry', () => {
 
         const next = buildLiveStreamingEntry(entry, {
             livePartsByMessageId: { assistant_1: [malformed, visible] },
-            showTextJustificationActivity: true,
             showTurnChangedFiles: false,
         });
 
@@ -136,7 +131,6 @@ describe('buildLiveStreamingEntry', () => {
 
         const next = buildLiveStreamingEntry(entry, {
             livePartsByMessageId: { assistant_1: finishedLive, assistant_2: streamingLive },
-            showTextJustificationActivity: true,
             showTurnChangedFiles: false,
         });
 
@@ -152,7 +146,6 @@ describe('buildLiveStreamingEntry', () => {
 
         const next = buildLiveStreamingEntry(entry, {
             livePartsByMessageId: { assistant_1: [] },
-            showTextJustificationActivity: true,
             showTurnChangedFiles: false,
         });
 
@@ -163,7 +156,6 @@ describe('buildLiveStreamingEntry', () => {
 describe('buildLiveStreamingEntry reuse across publishes', () => {
     const options = (liveParts: Part[]) => ({
         livePartsByMessageId: { asst_1: liveParts },
-        showTextJustificationActivity: false,
         showTurnChangedFiles: false,
     });
 

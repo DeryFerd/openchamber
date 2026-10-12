@@ -101,9 +101,11 @@ const main = async () => {
   const messages = await runSessionCli(["messages", ...base, "--session", sessionId, "--limit", String(checked), "--role", "assistant"])
   const assistant = (messages?.messages ?? []).length
   if (assistant < checked) throw new Error(`Only ${assistant} of the last ${checked} turns got an assistant reply; check the fixture provider.`)
-  const summary = { sessionId, turns: options.turns, assistantMessages: assistant, seconds: Math.round((Date.now() - startedAt) / 1000) }
+  // Only the last turns are checked, so the count says so: a bare "20" next
+  // to 120 turns reads as 100 missing replies.
+  const summary = { sessionId, turns: options.turns, lastTurnsChecked: checked, lastTurnsAnswered: assistant, seconds: Math.round((Date.now() - startedAt) / 1000) }
   if (options.json) console.log(JSON.stringify(summary))
-  else console.log(`Session ${sessionId}: ${assistant} assistant replies in ${summary.seconds}s`)
+  else console.log(`Session ${sessionId}: ${options.turns} turns in ${summary.seconds}s; the last ${checked} all answered`)
 }
 
 main().catch((error) => {

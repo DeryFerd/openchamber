@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import {
   ChildStoreManager,
@@ -16,7 +16,8 @@ import {
 } from './performance-diagnostics';
 import { DIR_IDLE_TTL_MS, EVICTION_GRACE_MS, MAX_DIR_STORES, type State } from './types';
 import { FilesystemError } from '@/lib/api/files-errors';
-import type { PermissionRequest } from '@/lib/opencode/model';
+import type { PermissionRequest, Session } from '@/lib/opencode/model';
+import { flushPendingSessionWrites, persistSessions, readDirCache } from './persist-cache';
 
 const deferred = () => {
   let resolve!: () => void;
@@ -942,6 +943,76 @@ describe('ChildStoreManager after an OpenCode stream restart', () => {
     tasks[1]?.resolve();
     await settle();
     cleanup();
+    manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager persisted session seed', () => {
+  const originalLocalStorage = globalThis.localStorage;
+  const values = new Map<string, string>();
+  const storage: Storage = {
+    get length() { return values.size; },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => { values.delete(key); },
+    setItem: (key, value) => { values.set(key, value); },
+  };
+  const spaceDirectory = '/spaces/a1b2c3d4e5f6/app';
+  const session = (directory: string): Session => ({
+    id: `ses_${directory.length}`,
+    projectID: 'project',
+    directory,
+    title: 'Cached',
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 1, updated: 2 },
+  });
+  const seedCache = (directory: string) => {
+    persistSessions(directory, [session(directory)]);
+    flushPendingSessionWrites();
+    expect(readDirCache(directory).sessions?.length).toBe(1);
+  };
+  const cachedKeys = () => [...values.keys()].filter((key) => key.startsWith('oc.dir.'));
+
+  beforeEach(() => {
+    values.clear();
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  });
+  afterEach(() => {
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalLocalStorage });
+  });
+
+  test('a new store seeds from the cache only where the owner allows it', () => {
+    seedCache('/workspace');
+    seedCache(spaceDirectory);
+    const manager = new ChildStoreManager({ seedsSessions: (directory) => !directory.startsWith('/spaces/') });
+    // Before `configure` as well: a consumer's store made during the first render is gated too.
+    expect(manager.ensureChild('/workspace', { bootstrap: false }).getState().session.map((entry) => entry.id)).toEqual(['ses_10']);
+    const space = manager.ensureChild(spaceDirectory, { bootstrap: false }).getState();
+    expect(space.session).toEqual([]);
+    expect(space.sessionListSource).toBe('empty');
+    // The cache itself stays: the owner may know the space at the next start.
+    expect(readDirCache(spaceDirectory).sessions?.length).toBe(1);
+    manager.disposeAll();
+  });
+
+  test('forgetting a directory empties its store, drops its cache and disposes it once nothing holds it', () => {
+    seedCache(spaceDirectory);
+    const manager = new ChildStoreManager();
+    const store = manager.ensureChild(spaceDirectory, { bootstrap: false });
+    expect(store.getState().session.length).toBe(1);
+    manager.pin(spaceDirectory);
+    manager.forgetDirectory(spaceDirectory);
+    // Held by a consumer: the store stays, listing nothing, and its cache is gone.
+    expect(manager.getChild(spaceDirectory)).toBe(store);
+    expect(store.getState().session).toEqual([]);
+    expect(store.getState().sessionListSource).toBe('empty');
+    expect(cachedKeys()).toEqual([]);
+    manager.unpin(spaceDirectory);
+    manager.forgetDirectory(spaceDirectory);
+    expect(manager.getChild(spaceDirectory)).toBe(undefined);
+    expect(cachedKeys()).toEqual([]);
     manager.disposeAll();
   });
 });

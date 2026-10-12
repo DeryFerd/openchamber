@@ -78,7 +78,7 @@ describe('projectTurnRecords lazy derived fields', () => {
 
         const rendered = projection.turns.slice(-3);
         for (const turn of rendered) {
-            void turn.activitySegments;
+            void turn.activityParts;
             void turn.changedFiles;
             void turn.summaryText;
         }
@@ -89,7 +89,7 @@ describe('projectTurnRecords lazy derived fields', () => {
         for (const turn of rendered) {
             void turn.activityParts;
             void turn.hasTools;
-            void turn.diffStats;
+            void turn.changedFiles;
         }
         expect(counter.reads).toBe(readsForThreeTurns);
     });
@@ -102,16 +102,14 @@ describe('projectTurnRecords lazy derived fields', () => {
         expect(turn?.hasTools).toBe(true);
         expect(turn?.hasReasoning).toBe(true);
         expect(turn?.changedFiles?.map((file) => file.file)).toEqual(['/repo/a0.ts']);
-        expect(turn?.diffStats?.files).toBe(1);
         expect(turn?.activityParts.map((activity) => activity.kind)).toEqual(['reasoning', 'tool']);
     });
 
-    test('hides changed files but keeps diff stats when the setting is off', () => {
+    test('hides changed files when the setting is off', () => {
         const counter = { reads: 0 };
         const [turn] = projectTurnRecords(buildSession(1, counter), { showTurnChangedFiles: false }).turns;
 
         expect(turn?.changedFiles).toBeUndefined();
-        expect(turn?.diffStats?.files).toBe(1);
     });
 
     test('a spread copy carries the derived values', () => {

@@ -83,7 +83,7 @@ function ComposerAutocompletePopupsView(props: ComposerAutocompletePopupsProps) 
     return (
         <AnimatePresence>
             {open ? (
-                <GlassPopupMotion key={open} className="absolute inset-x-0 top-0 z-[100] h-0 origin-top-left">
+                <GlassPopupMotion key={open} className="absolute inset-x-0 top-0 z-[100] h-0 origin-top-left rtl:origin-top-right">
                     <AutocompletePopup {...props} open={open} />
                 </GlassPopupMotion>
             ) : null}

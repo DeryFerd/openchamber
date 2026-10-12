@@ -169,13 +169,13 @@ const StartupInitializationRecovery: React.FC<{
           <p className="typography-body text-muted-foreground">{t(getInitRecoveryDescriptionKey(diagnostics, failure))}</p>
         </div>
         {failureMessage && (
-          <dl className="w-full min-w-0 text-left" aria-live="polite">
+          <dl className="w-full min-w-0 text-start" aria-live="polite">
             <dt className="typography-meta text-muted-foreground">{t('startup.initRecovery.lastError')}</dt>
             <dd className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--surface-muted)] px-3 py-2 font-mono typography-meta text-muted-foreground">{failureMessage}</dd>
           </dl>
         )}
         {diagnostics && (
-          <dl className="w-full min-w-0 space-y-3 text-left" aria-live="polite">
+          <dl className="w-full min-w-0 space-y-3 text-start" aria-live="polite">
             {diagnostics.binary && (
               <div>
                 <dt className="typography-meta text-muted-foreground">{t('startup.initRecovery.binary')}</dt>

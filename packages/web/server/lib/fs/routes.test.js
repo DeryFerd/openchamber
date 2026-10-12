@@ -678,6 +678,7 @@ describe('fs rename', () => {
     await registerRename(fsPromises)({ body: { oldPath: '/repo/a.txt', newPath: '/repo/b.txt' } }, res);
 
     expect(res.statusCode).toBe(404);
+    expect(res.body.reason).toBe('not-found');
     expect(fsPromises.rename).not.toHaveBeenCalled();
   });
 });
@@ -840,6 +841,76 @@ describe('fs upload', () => {
     expect(res.statusCode).toBe(409);
     expect(res.body).toEqual({ error: 'File already exists', reason: 'already-exists' });
     expect(fsPromises.unlink).toHaveBeenCalledWith(expect.stringMatching(/^\/repo\/file\.bin\.upload-/));
+  });
+});
+
+describe('fs rename on a real disk', () => {
+  let repo;
+  let rename;
+  beforeEach(async () => {
+    repo = await mkdtemp(path.join(tmpdir(), 'oc-fs-rename-'));
+    await mkdir(path.join(repo, 'src', 'nested'), { recursive: true });
+    await mkdir(path.join(repo, 'lib'), { recursive: true });
+    await nativeFs.writeFile(path.join(repo, 'src', 'a.ts'), 'source');
+    await nativeFs.writeFile(path.join(repo, 'lib', 'a.ts'), 'keep me');
+
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path,
+      fsPromises: nativeFs,
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: repo }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    const route = getRoute('POST', '/api/fs/rename');
+    rename = async (oldPath, newPath) => {
+      const res = createMockResponse();
+      await route({ body: { oldPath: path.join(repo, oldPath), newPath: path.join(repo, newPath) } }, res);
+      return res;
+    };
+  });
+  afterEach(async () => {
+    await rm(repo, { recursive: true, force: true });
+  });
+
+  it('moves a file into another folder', async () => {
+    const res = await rename('src/a.ts', 'src/nested/a.ts');
+
+    expect(res.body).toEqual({ success: true, path: path.join(repo, 'src/nested/a.ts') });
+    expect(await nativeFs.readFile(path.join(repo, 'src/nested/a.ts'), 'utf8')).toBe('source');
+    await expect(nativeFs.access(path.join(repo, 'src/a.ts'))).rejects.toThrow();
+  });
+
+  it('refuses to replace an existing file and leaves both files untouched', async () => {
+    const res = await rename('src/a.ts', 'lib/a.ts');
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'Destination path already exists', reason: 'already-exists' });
+    expect(await nativeFs.readFile(path.join(repo, 'lib/a.ts'), 'utf8')).toBe('keep me');
+    expect(await nativeFs.readFile(path.join(repo, 'src/a.ts'), 'utf8')).toBe('source');
+  });
+
+  it('refuses to replace an existing empty folder', async () => {
+    await mkdir(path.join(repo, 'lib', 'nested'));
+
+    const res = await rename('src/nested', 'lib/nested');
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body.reason).toBe('already-exists');
+    expect((await nativeFs.stat(path.join(repo, 'src/nested'))).isDirectory()).toBe(true);
+  });
+
+  it('refuses to move a folder into its own subfolder', async () => {
+    const res = await rename('src', 'src/nested/src');
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Cannot move a folder into itself' });
+    expect(await nativeFs.readFile(path.join(repo, 'src/a.ts'), 'utf8')).toBe('source');
   });
 });
 
@@ -2034,10 +2105,50 @@ describe('fs stat directory error handling', () => {
     expect(failure.body).toEqual({ error: 'Failed to stat directory' });
     expect(readdir).not.toHaveBeenCalled();
   });
+
+  it('answers many directory stats in one request, isolating failures per path', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const enoent = Object.assign(new Error('missing'), { code: 'ENOENT' });
+    const stat = vi.fn(async (targetPath) => {
+      if (targetPath === '/gone') throw enoent;
+      if (targetPath === '/file') return { isDirectory: () => false };
+      return { isDirectory: () => true };
+    });
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path: path.posix,
+      fsPromises: { realpath: async (targetPath) => targetPath, stat, readdir: vi.fn(async () => []) },
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: '/repo' }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    const handler = getRoute('POST', '/api/fs/directory-stats');
+
+    const response = createMockResponse();
+    await handler({ body: { paths: ['/repo', '/gone', '/file'] } }, response);
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ results: [
+      { path: '/repo', isDirectory: true },
+      { path: '/gone', isDirectory: false, reason: 'not-found' },
+      { path: '/file', isDirectory: false, reason: 'not-directory' },
+    ] });
+
+    const invalid = createMockResponse();
+    await handler({ body: { paths: [] } }, invalid);
+    expect(invalid.statusCode).toBe(400);
+
+    const tooMany = createMockResponse();
+    await handler({ body: { paths: Array.from({ length: 201 }, (_, index) => `/repo-${index}`) } }, tooMany);
+    expect(tooMany.statusCode).toBe(400);
+  });
 });
 
 describe('fs managed chats root', () => {
-  const registerWithChatsRoot = ({ managedChatsRoot, fsPromises = {} } = {}) => {
+  const registerWithChatsRoot = ({ managedChatsRoot, fsPromises = {}, resolveProjectDirectory = async () => ({ directory: '/repo' }) } = {}) => {
     const { app, getRoute } = createRouteRegistry();
     registerFsRoutes(app, {
       os: { homedir: () => '/home/user' },
@@ -2050,7 +2161,7 @@ describe('fs managed chats root', () => {
       spawn: vi.fn(),
       crypto: { randomUUID: () => 'job-0' },
       normalizeDirectoryPath: (p) => p,
-      resolveProjectDirectory: async () => ({ directory: '/repo' }),
+      resolveProjectDirectory,
       buildAugmentedPath: () => '/usr/bin',
       resolveGitBinaryForSpawn: () => 'git',
       openchamberUserConfigRoot: '/home/user/.config/openchamber',
@@ -2161,10 +2272,58 @@ describe('fs managed chats root', () => {
     expect(res.statusCode).toBe(400);
     expect(res.body).toEqual({ error: 'Path is outside of active workspace' });
   });
+
+  describe('with no project open', () => {
+    const noProject = async () => ({ directory: null, error: 'Directory parameter or active project is required' });
+
+    it('allows mkdir inside the chats root', async () => {
+      const mkdirCalls = [];
+      const { mkdir } = registerWithChatsRoot({
+        resolveProjectDirectory: noProject,
+        fsPromises: { mkdir: async (targetPath) => { mkdirCalls.push(targetPath); } },
+      });
+
+      const res = createMockResponse();
+      await mkdir({ body: { path: '/home/user/.config/openchamber/chats/2026-10-12/session-a' } }, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(mkdirCalls).toEqual(['/home/user/.config/openchamber/chats/2026-10-12/session-a']);
+    });
+
+    it('allows mkdir inside the canonical chats root', async () => {
+      const { mkdir } = registerWithChatsRoot({
+        managedChatsRoot: '/srv/chat-alias',
+        resolveProjectDirectory: noProject,
+        fsPromises: { realpath: async (directory) => (directory === '/srv/chat-alias' ? '/storage/chats' : directory) },
+      });
+
+      const res = createMockResponse();
+      await mkdir({ body: { path: '/storage/chats/day/session-a' } }, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.path).toBe('/storage/chats/day/session-a');
+    });
+
+    it('rejects the config root and everything else outside the chats root', async () => {
+      const mkdirCalls = [];
+      const { mkdir } = registerWithChatsRoot({
+        resolveProjectDirectory: noProject,
+        fsPromises: { mkdir: async (targetPath) => { mkdirCalls.push(targetPath); } },
+      });
+
+      for (const target of ['/home/user/.config/openchamber/extensions', '/home/user/.config/openchamber', '/home/user/projects/app']) {
+        const res = createMockResponse();
+        await mkdir({ body: { path: target } }, res);
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({ error: 'Directory parameter or active project is required' });
+      }
+      expect(mkdirCalls).toEqual([]);
+    });
+  });
 });
 
 describe('canonical managed roots with real filesystem aliases', () => {
-  const setup = async (context, { relocated = false, caseAlias = false } = {}) => {
+  const setup = async (context, { relocated = false, caseAlias = false, project = true } = {}) => {
     const root = await nativeFs.mkdtemp(path.join(tmpdir(), 'oc-canonical-chats-'));
     context.onTestFinished(() => nativeFs.rm(root, { recursive: true, force: true }));
     const home = path.join(root, 'Home');
@@ -2182,10 +2341,12 @@ describe('canonical managed roots with real filesystem aliases', () => {
     registerFsRoutes(app, {
       os: { homedir: () => reportedHome }, path, fsPromises: nativeFs,
       normalizeDirectoryPath: value => value,
-      resolveProjectDirectory: async () => ({ directory: path.join(root, 'unrelated-project') }),
+      resolveProjectDirectory: async () => (project
+        ? { directory: path.join(root, 'unrelated-project') }
+        : { directory: null, error: 'Directory parameter or active project is required' }),
       openchamberUserConfigRoot: config, managedChatsRoot: rawChats,
     });
-    return { getRoute, canonicalHome, canonicalChats, rawChats, reportedHome };
+    return { getRoute, canonicalHome, canonicalChats, rawChats, reportedHome, config };
   };
 
   for (const relocated of [false, true]) {
@@ -2216,6 +2377,31 @@ describe('canonical managed roots with real filesystem aliases', () => {
       expect((await nativeFs.stat(path.join(canonicalChats, 'legacy-session'))).isDirectory()).toBe(true);
     });
   }
+
+  it('with no project, writes inside the canonical chats root and the old chats root, and nowhere else', async context => {
+    const { getRoute, canonicalChats, config } = await setup(context, { relocated: true, project: false });
+    const mkdir = getRoute('POST', '/api/fs/mkdir');
+    const write = getRoute('POST', '/api/fs/write');
+
+    const chat = path.join(canonicalChats, 'day/session-a');
+    const created = createMockResponse();
+    await mkdir({ body: { path: chat } }, created);
+    expect(created.statusCode).toBe(200);
+    const written = createMockResponse();
+    await write({ body: { path: path.join(chat, 'notes.md'), content: 'hi' } }, written);
+    expect(written.statusCode).toBe(200);
+    expect(await nativeFs.readFile(path.join(chat, 'notes.md'), 'utf8')).toBe('hi');
+
+    const oldChat = path.join(config, 'chats/day/session-b');
+    const oldCreated = createMockResponse();
+    await mkdir({ body: { path: oldChat } }, oldCreated);
+    expect(oldCreated.statusCode).toBe(200);
+
+    const outside = createMockResponse();
+    await write({ body: { path: path.join(config, 'settings.json'), content: '{}' } }, outside);
+    expect(outside.statusCode).toBe(400);
+    expect(outside.body).toEqual({ error: 'Directory parameter or active project is required' });
+  });
 
   it('reports on-disk home casing on a case-insensitive macOS volume', { skip: process.platform !== 'darwin' }, async context => {
     const { getRoute, canonicalChats, rawChats, reportedHome } = await setup(context, { caseAlias: true });

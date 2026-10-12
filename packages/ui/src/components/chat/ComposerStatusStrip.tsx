@@ -17,7 +17,7 @@ interface ComposerStatusStripProps {
  */
 export const ComposerStatusStrip: React.FC<ComposerStatusStripProps> = React.memo(({ icon, spin = false, text }) => (
   <div role="status" className="border-b border-border/60">
-    <div className="flex h-10 items-center gap-2 pl-3 pr-3">
+    <div className="flex h-10 items-center gap-2 ps-3 pe-3">
       <Icon name={icon} className={spin ? 'size-3.5 shrink-0 animate-spin text-muted-foreground' : 'size-3.5 shrink-0 text-muted-foreground'} aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate typography-meta text-muted-foreground">{text}</span>
     </div>

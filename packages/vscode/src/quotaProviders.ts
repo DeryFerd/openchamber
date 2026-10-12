@@ -3,13 +3,12 @@ import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { fetchOpenCodeGoUsage, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
-import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
+import { fetchOpenCodeGoUsage, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
+import { deleteLegacyOllamaCloudCredential, deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { readOpenCodeCredentials } from './opencodeAuth';
 import { readConfig } from './opencodeConfig';
 import { isRecord, toProviderEntity } from './opencode-config-v2';
 import { fetchExeDevUsage } from './exeDevQuota';
-import { fetchOllamaUsage } from './ollamaQuota';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -381,6 +380,15 @@ const asNonEmptyString = (value: unknown): string | null => {
   return trimmed ? trimmed : null;
 };
 
+/**
+ * The Ollama Cloud API key on one auth entry, or null.
+ *
+ * Mirrors `apiKeyFromAuth` in the web server's `ollama-cloud.js`: the key a chat
+ * request would use, so the tracker reports on the account OpenCode has active.
+ */
+const ollamaApiKeyFrom = (entry: ReturnType<typeof normalizeAuthEntry>): string | null =>
+  asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+
 const parseGoogleRefreshToken = (rawRefreshToken: unknown) => {
   const refreshToken = asNonEmptyString(rawRefreshToken);
   if (!refreshToken) {
@@ -424,7 +432,9 @@ const toTimestamp = (value: unknown): number | null => {
 // an `opencode-go` service key. Credentials are global and OpenCode marks one
 // active per integration, so this is the selected account and organization.
 const CONSOLE_SERVER = 'https://opencode.ai/console';
-const CONSOLE_ORGANIZATION_ID_PATTERN = /^org_[A-Za-z0-9]+$/;
+// Console workspaces carry a `wrk_` id on current sign-ins; older stored
+// credentials still carry `org_`, so both prefixes count and nothing else.
+const CONSOLE_ORGANIZATION_ID_PATTERN = /^(?:org|wrk)_[A-Za-z0-9]+$/;
 const openCodeGoConsoleCredential = (auth: AuthFile): OpenCodeGoConsoleCredential | null => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['opencode']));
   if (!entry || entry.type !== 'oauth') return null;
@@ -433,6 +443,20 @@ const openCodeGoConsoleCredential = (auth: AuthFile): OpenCodeGoConsoleCredentia
   if (!accessToken || entry.server !== CONSOLE_SERVER || !orgID || !CONSOLE_ORGANIZATION_ID_PATTERN.test(orgID)) return null;
   const expires = toNumber(entry.expires);
   return { accessToken, orgID, expires };
+};
+
+// A key on `opencode-go` comes first. Otherwise an API key on the shared
+// `opencode` integration serves Go too: OpenCode loads the Console workspace's
+// providers with it and binds OpenCode Go to that integration when the
+// workspace has Go. Providers lists it under OpenCode Go too.
+const openCodeGoApiKey = (auth: AuthFile): OpenCodeGoApiKeyCredential | null => {
+  const own = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
+  const ownKey = asNonEmptyString(own?.key) ?? asNonEmptyString(own?.token);
+  if (ownKey) return { apiKey: ownKey, consoleKey: false };
+  const consoleEntry = normalizeAuthEntry(getAuthEntry(auth, ['opencode']));
+  if (!consoleEntry || consoleEntry.type === 'oauth') return null;
+  const consoleKey = asNonEmptyString(consoleEntry.key) ?? asNonEmptyString(consoleEntry.token);
+  return consoleKey ? { apiKey: consoleKey, consoleKey: true } : null;
 };
 
 const formatResetTime = (timestamp: number) => {
@@ -794,12 +818,16 @@ const getKimiApiKey = (auth: AuthFile) => {
 export const listConfiguredQuotaProviders = async () => {
   const auth = await readOpenCodeCredentials();
   const configured = new Set<string>();
-  const openCodeGoAuth = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
-  if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
-  if (openCodeGoConsoleCredential(auth)) configured.add('opencode-go');
-  if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
+  if (openCodeGoApiKey(auth) || openCodeGoConsoleCredential(auth)) configured.add('opencode-go');
   if (readCredential('cursor')) configured.add('cursor');
   if (readCredential('exe-dev')) configured.add('exe-dev');
+
+  // Ollama Cloud reads its key from OpenCode's credential store, so it is
+  // configured exactly when that integration has a key.
+  const ollamaAuth = normalizeAuthEntry(getAuthEntry(auth, ['ollama-cloud', 'ollamacloud']));
+  if (ollamaApiKeyFrom(ollamaAuth)) {
+    configured.add('ollama-cloud');
+  }
 
   const anthropicAuth = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude']));
   if (anthropicAuth && ((anthropicAuth as Record<string, unknown>).access || (anthropicAuth as Record<string, unknown>).token)) {
@@ -1989,16 +2017,99 @@ const fetchMiniMaxCnCodingPlanQuota = () => fetchMiniMaxQuota({
   usageFieldsAreRemaining: true,
 });
 
+/** The active account's Ollama Cloud API key, the same one chat requests use. */
+const readOllamaCloudApiKey = async (): Promise<string | undefined> => {
+  const entry = normalizeAuthEntry(getAuthEntry(await readOpenCodeCredentials(), ['ollama-cloud', 'ollamacloud']));
+  return ollamaApiKeyFrom(entry) ?? undefined;
+};
+
+const OLLAMA_BALANCE_URL = 'https://ollama.com/api/balance';
+const OLLAMA_ME_URL = 'https://ollama.com/api/me';
+
+/**
+ * The account's credit pool, mirroring `toUsageWindows` in the web server's
+ * `quota/providers/ollama-cloud.js`.
+ */
+const fetchOllamaCloudUsage = async (
+  apiKey: string,
+  fetchImpl: (url: string, init: RequestInit) => Promise<Response> = fetch,
+): Promise<Record<string, UsageWindow>> => {
+  const response = await fetchImpl(OLLAMA_BALANCE_URL, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (response.status === 401 || response.status === 403) throw new Error('Ollama Cloud authentication failed');
+  if (!response.ok) throw new Error(`Ollama Cloud returned HTTP ${response.status}`);
+
+  const payload = asObject(await response.json());
+  const included = asObject(payload?.included);
+  const allowance = toNumber(included?.allowance_usd);
+  const remaining = toNumber(included?.balance_usd);
+  const windows: Record<string, UsageWindow> = {};
+  if (allowance !== null && allowance > 0 && remaining !== null) {
+    windows.monthly = toUsageWindow({
+      usedPercent: Math.min(100, Math.max(0, ((allowance - remaining) / allowance) * 100)),
+      windowSeconds: null,
+      resetAt: toTimestamp(asObject(included?.period)?.until),
+    });
+  }
+
+  for (const name of ['session', 'weekly'] as const) {
+    const limit = asObject(included?.[name]);
+    const remainingPercent = toNumber(limit?.remaining_percent);
+    if (remainingPercent === null) continue;
+    windows[name] = toUsageWindow({
+      usedPercent: Math.min(100, Math.max(0, 100 - remainingPercent)),
+      windowSeconds: null,
+      resetAt: toTimestamp(limit?.resets_at),
+    });
+  }
+
+  const purchased = toNumber(asObject(payload?.purchased)?.balance_usd);
+  if (purchased !== null && purchased > 0) {
+    windows.purchased_credits = toUsageWindow({
+      usedPercent: null,
+      windowSeconds: null,
+      resetAt: null,
+      valueLabel: `$${formatMoney(purchased)}`,
+    });
+  }
+
+  if (Object.keys(windows).length === 0) throw new Error('Ollama Cloud usage data could not be parsed');
+  return windows;
+};
+
+/** The plan tier ("free", "pro", "max"), best-effort: a failure drops the label, not the reading. */
+const fetchOllamaCloudPlan = async (
+  apiKey: string,
+  fetchImpl: (url: string, init: RequestInit) => Promise<Response> = fetch,
+): Promise<string | null> => {
+  const response = await fetchImpl(OLLAMA_ME_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) return null;
+  return asNonEmptyString(asObject(await response.json())?.Plan);
+};
+
 export const fetchOllamaCloudQuota = async ({
-  readCookie = () => readCredential('ollama-cloud')?.cookie,
+  readApiKey,
   fetchImpl = fetch,
 }: {
-  readCookie?: () => string | undefined;
+  readApiKey?: () => string | undefined | Promise<string | undefined>;
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
 } = {}): Promise<ProviderResult> => {
-  const cookie = readCookie();
+  // The cookie this provider used to store is obsolete the first time we reach
+  // for the key instead. Removed on the first refresh whether or not a key is
+  // readable, so a user who only ever pasted a cookie never keeps a browser
+  // session cookie on disk. Mirrors the web server's cleanup.
+  deleteLegacyOllamaCloudCredential();
 
-  if (!cookie) {
+  const apiKey = await (readApiKey ?? readOllamaCloudApiKey)();
+
+  if (!apiKey) {
     return buildResult({
       providerId: 'ollama-cloud',
       providerName: 'Ollama Cloud',
@@ -2009,10 +2120,10 @@ export const fetchOllamaCloudQuota = async ({
   }
 
   try {
-    const parsed = await fetchOllamaUsage(cookie, fetchImpl);
-    const windows = Object.fromEntries(Object.entries(parsed).map(([key, value]) => [
-      key, toUsageWindow({ ...value, windowSeconds: null, resetAt: null }),
-    ]));
+    const [windows, plan] = await Promise.all([
+      fetchOllamaCloudUsage(apiKey, fetchImpl),
+      fetchOllamaCloudPlan(apiKey, fetchImpl).catch(() => null),
+    ]);
 
     return buildResult({
       providerId: 'ollama-cloud',
@@ -2020,6 +2131,7 @@ export const fetchOllamaCloudQuota = async ({
       ok: true,
       configured: true,
       usage: { windows },
+      planLabel: plan,
     });
   } catch (error) {
     return buildResult({
@@ -3842,12 +3954,10 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
         deleteLegacyOpenCodeGoCredential();
         const auth = await readOpenCodeCredentials();
         // A Console sign-in serves OpenCode Go once it exists; the
-        // `opencode-go` service key is the fallback for accounts without one,
-        // and for a Console read that fails (no Go in that org, an endpoint
-        // change, a hiccup).
+        // API key is the fallback for accounts without one, and for a Console
+        // read that fails (no Go in that org, an endpoint change, a hiccup).
         const consoleCredential = openCodeGoConsoleCredential(auth);
-        const entry = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
-        const apiKey = typeof entry?.key === 'string' ? entry.key : typeof entry?.token === 'string' ? entry.token : null;
+        const apiKey = openCodeGoApiKey(auth);
         if (consoleCredential) {
           try {
             return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(consoleCredential) } });
@@ -3856,7 +3966,7 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
           }
         }
         if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
-        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage({ apiKey }) } });
+        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(apiKey) } });
       } catch (error) {
         return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
       }

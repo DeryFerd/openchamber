@@ -3,6 +3,16 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { TextPart } from '@/lib/opencode/model';
+import { getUrlScheme, isAppLinkUrl } from '@/lib/url';
+
+const classifyAppLinkUrl = isAppLinkUrl;
+const readUrlScheme = getUrlScheme;
+let fileLinkTestDirectory: string | null = null;
+// Files the stat route reports as existing, and references inside the
+// workspace (probed) rather than outside it (linked without a probe).
+let existingTestFiles = new Set<string>();
+let fileLinksInsideWorkspace = false;
+const statRequests: string[] = [];
 
 type OperationCounts = {
   innerHTMLWrites: number;
@@ -305,14 +315,21 @@ const initializePerformanceDom = async (): Promise<void> => {
   mock.module('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
   mock.module('@/contexts/useThemeSystem', () => ({ useOptionalThemeSystem: () => null }));
   mock.module('@/stores/useUIStore', () => ({ useUIStore: Object.assign((selector: (state: typeof fakeState) => UIStateSelection) => selector(fakeState), { getState: () => fakeState }) }));
-  mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => null }));
+  mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => fileLinkTestDirectory }));
   mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ editor: undefined, runtime: { isVSCode: false } }) }));
-  mock.module('@/lib/runtime-fetch', () => ({ runtimeFetch: async () => ({ ok: false }) }));
-  mock.module('@/lib/url', () => ({ getUrlScheme: () => null, isAppLinkUrl: () => false, isExternalHttpUrl: () => false, openConfirmedAppLinkUrl: async () => false, openExternalUrl: async () => undefined, getExternalFaviconUrl: () => null, isLoopbackHttpUrl: () => false }));
+  mock.module('@/lib/runtime-fetch', () => ({
+    runtimeFetch: async (url: string) => {
+      const statPath = new URL(url, 'http://test').searchParams.get('path');
+      if (!url.startsWith('/api/fs/stat') || statPath === null) return { ok: false };
+      statRequests.push(statPath);
+      return { ok: true, json: async () => ({ exists: existingTestFiles.has(statPath) }) };
+    },
+  }));
+  mock.module('@/lib/url', () => ({ getUrlScheme: readUrlScheme, isAppLinkUrl: classifyAppLinkUrl, isExternalHttpUrl: () => false, openConfirmedAppLinkUrl: async () => false, openExternalUrl: async () => undefined, getExternalFaviconUrl: () => null, isLoopbackHttpUrl: () => false }));
   mock.module('@/lib/desktop', () => ({ isDesktopLocalOriginActive: () => false, isDesktopShell: () => false, isVSCodeRuntime: () => false, openDesktopPath: async () => false }));
   mock.module('@/lib/runtimeSurface', () => ({ isMobileSurfaceRuntime: () => false }));
   mock.module('@/lib/router/openSessionFromRoute', () => ({ openSessionLink: async () => undefined }));
-  mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFilePathWithinDirectory: () => true, toAbsoluteFilePath: () => '', normalizeFilePath: (value: string) => value, isAbsoluteFilePath: (value: string) => value.startsWith('/') }));
+  mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFilePathWithinDirectory: () => fileLinksInsideWorkspace || fileLinkTestDirectory === null, toAbsoluteFilePath: (_base: string, value: string) => `/outside/${value}`, normalizeFilePath: (value: string) => value, isAbsoluteFilePath: (value: string) => value.startsWith('/') }));
   mock.module('@/lib/clipboard', () => ({ copyTextToClipboard: async () => undefined }));
   mock.module('beautiful-mermaid', () => ({
     renderMermaidASCII: () => 'diagram',
@@ -342,6 +359,84 @@ afterAll(() => {
 });
 
 describe('MarkdownRenderer DOM mount performance contract', () => {
+  test('does not annotate app links with file-looking labels as internal file links', async () => {
+    fileLinkTestDirectory = '/repo';
+    const host = document.createElement('div');
+    document.body.replaceChildren(host);
+    const root = createRoot(host);
+    const urls = [
+      'vscode://file/C:/Project/src/PlayerData.luau:42',
+      'cursor://file/Project/package.json:7',
+    ];
+    try {
+      await act(async () => {
+        root.render(<MarkdownRenderer
+          content={`[PlayerData.luau:42](${urls[0]})\n\n[package.json:7](${urls[1]})\n\n\`ordinary.ts:12\``}
+          messageId="app-file-links"
+          isAnimated={false}
+          isStreaming={false}
+          enableFileReferences
+        />);
+        await waitForSettledEffects();
+      });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+      await flushAnimationFrame();
+      await act(async () => waitForSettledEffects());
+      const anchors = host.querySelectorAll('a');
+      expect(Array.from(anchors).map((anchor) => anchor.getAttribute('href'))).toEqual(urls);
+      for (const anchor of anchors) {
+        expect(anchor.hasAttribute('data-openchamber-file-link')).toBe(false);
+      }
+      // The annotation pass really ran: a normal reference still opens internally.
+      expect(host.querySelector('[data-markdown="inline-code"]')?.getAttribute('data-openchamber-file-link')).toBe('true');
+    } finally {
+      await act(async () => root.unmount());
+      fileLinkTestDirectory = null;
+    }
+  });
+
+  test('links a path in a code block only after its file is confirmed', async () => {
+    fileLinkTestDirectory = '/repo';
+    fileLinksInsideWorkspace = true;
+    existingTestFiles = new Set(['/outside/src/app.ts']);
+    statRequests.length = 0;
+    const host = document.createElement('div');
+    document.body.replaceChildren(host);
+    const root = createRoot(host);
+    const code = 'src/app.ts:12 failed: console.log(this.state.ts)';
+    const tokens = () => Array.from(host.querySelectorAll('pre code [data-openchamber-block-path-token]'));
+    try {
+      await act(async () => {
+        root.render(<MarkdownRenderer
+          content={`\`\`\`\n${code}\n\`\`\``}
+          messageId="code-block-paths"
+          isAnimated={false}
+          isStreaming={false}
+          enableFileReferences
+        />);
+        await waitForSettledEffects();
+      });
+      // Mounting writes nothing into the block.
+      expect(tokens()).toHaveLength(0);
+
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+      await flushAnimationFrame();
+      await act(async () => waitForSettledEffects());
+
+      // Every path-like token was probed, and only the real file became a link.
+      expect([...new Set(statRequests)].sort()).toEqual(['/outside/console.log', '/outside/src/app.ts', '/outside/this.state.ts']);
+      expect(tokens().map((token) => token.textContent)).toEqual(['src/app.ts:12']);
+      expect(tokens()[0]?.getAttribute('data-openchamber-file-link')).toBe('true');
+      expect(tokens()[0]?.getAttribute('data-openchamber-file-path')).toBe('/outside/src/app.ts');
+      expect(host.querySelector('pre code')?.textContent).toContain(code);
+    } finally {
+      await act(async () => root.unmount());
+      fileLinkTestDirectory = null;
+      fileLinksInsideWorkspace = false;
+      existingTestFiles = new Set();
+    }
+  });
+
   test('preserves disclosure choices through streaming, settlement, and redecorating', async () => {
     const host = document.createElement('div');
     document.body.replaceChildren(host);

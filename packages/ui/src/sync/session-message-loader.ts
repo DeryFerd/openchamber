@@ -110,7 +110,7 @@ type LoadPerformanceDetails = {
 export type SessionMessagePageSource = {
   getSessionMessages(
     id: string,
-    options?: { limit?: number; cursor?: string; order?: "asc" | "desc" },
+    options?: { limit?: number; cursor?: string; order?: "asc" | "desc"; partShells?: boolean },
     directory?: string | null,
   ): Promise<MessagePage>
 }
@@ -693,7 +693,14 @@ export class SessionMessageLoader {
     this.getEntry(target).optimistic.delete(input.messageID)
   }
 
-  /** Revert commits preserve only the optimistic records still in the reduced transcript. */
+  /**
+   * Revert commits preserve only the optimistic records still in the reduced
+   * transcript. A revert cuts the tail, so when a confirmed record survives
+   * the cut, the window still starts where it did and its older-history
+   * coverage (cursor, complete) still holds: a reset would read as "nothing
+   * older" and take away the way to it. A cut that took every confirmed
+   * record leaves no window to describe, and coverage starts over.
+   */
   invalidateSession(target: SessionMessageTarget, preservedMessages: readonly Message[] = []): void {
     const normalized = this.normalizeTarget(target)
     if (!normalized) return
@@ -706,7 +713,11 @@ export class SessionMessageLoader {
     for (const messageID of entry.optimistic.keys()) {
       if (!preservedIDs.has(messageID)) entry.optimistic.delete(messageID)
     }
-    entry.snapshot = createDefaultState(entry.snapshot.generation)
+    const windowSurvives = entry.snapshot.resolved
+      && preservedMessages.some((message) => !entry.optimistic.has(message.id))
+    entry.snapshot = windowSurvives
+      ? { ...entry.snapshot, status: "ready", loadingKind: null, error: null }
+      : createDefaultState(entry.snapshot.generation)
     this.notify(entry)
   }
 
@@ -950,7 +961,9 @@ export class SessionMessageLoader {
     try {
       const page = await retry(async () => {
         attempts += 1
-        return this.sdk.getSessionMessages(target.sessionID, { limit, cursor }, target.directory)
+        // Finished tool results arrive as shells; a row that shows one
+        // completes its message (`tool-content-completion.ts`).
+        return this.sdk.getSessionMessages(target.sessionID, { limit, cursor, partShells: true }, target.directory)
       })
       const records = page.items.filter((record) => Boolean(record?.info?.id))
       recordCount = records.length

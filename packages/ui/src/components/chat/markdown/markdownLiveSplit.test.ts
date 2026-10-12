@@ -124,25 +124,4 @@ describe('incremental split while prose streams', () => {
     expect(settled.map((block) => block.raw)).toEqual(streamed.map((block) => block.raw));
     expect(settled.every((block) => block.mode === 'full' && block.src === block.raw)).toBe(true);
   });
-
-  test('a message streaming in the sorted mode is split incrementally and kept out of the settled memo', () => {
-    const text = Object.values(documents).join('\n');
-    resetLiveSplitMemoForTests();
-    const steps: Array<{ prefix: string; blocks: ReturnType<typeof __streamBlocksForTests> }> = [];
-    for (let end = 1; end <= text.length; end += 7) {
-      const prefix = text.slice(0, end);
-      steps.push({ prefix, blocks: __streamBlocksForTests(prefix, false, true) });
-    }
-    const stats = __liveSplitStatsForTests();
-    expect(stats.settled).toBe(0);
-    expect(stats.reused + stats.lexed).toBe(steps.length);
-    // Each step renders as the settled split of that text would.
-    for (const { prefix, blocks } of steps.filter((_, index) => index % 25 === 0)) {
-      resetLiveSplitMemoForTests();
-      expect(blocks).toEqual(__streamBlocksForTests(prefix, false));
-    }
-    resetLiveSplitMemoForTests();
-    __streamBlocksForTests(text, false);
-    expect(__liveSplitStatsForTests().settled).toBe(1);
-  });
 });

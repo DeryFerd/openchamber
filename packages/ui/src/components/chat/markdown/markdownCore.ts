@@ -17,6 +17,7 @@ import {
   type FingerprintState,
 } from './highlightResultCache';
 import { highlightCodeInWorker } from './markdown-worker';
+import { createOpenFenceRenderer, type OpenFencePatch } from './openFenceIncremental';
 import { streamTuning } from '../lib/streamTuningFlags';
 import {
   DOCUMENT_HTML_ALLOWED_ATTR,
@@ -239,10 +240,6 @@ type MarkdownBlock = {
   plainText?: true;
   // A trailing fence whose closing marker has not arrived yet.
   openFence?: true;
-  // The last block of a message that is still streaming but rendered as if
-  // settled (the sorted chat mode). It changes with every step, so it is
-  // cached with the live blocks instead of pushing settled blocks out.
-  growing?: true;
   // The piece of the split this block renders; carries its content hash.
   segment?: Segment;
 };
@@ -515,9 +512,8 @@ export const __liveSplitStatsForTests = () => ({ ...liveSplitStats, settled: set
 export const __streamBlocksForTests = (
   text: string,
   live: boolean,
-  growing = live,
 ): Array<Pick<MarkdownBlock, 'raw' | 'src' | 'mode' | 'highlight'>> =>
-  streamBlocks(text, live, 'escape', growing).map(({ raw, src, mode, highlight }) => ({ raw, src, mode, highlight }));
+  streamBlocks(text, live, 'escape').map(({ raw, src, mode, highlight }) => ({ raw, src, mode, highlight }));
 
 /**
  * Split markdown into render blocks, one per top-level token. While
@@ -526,26 +522,20 @@ export const __streamBlocksForTests = (
  * partial fence does not corrupt the parse of stable content above it. A
  * settled message renders every block from its own text, so blocks that were
  * complete while streaming keep their identity when the stream ends.
- *
- * `growing` marks text that is still streaming but rendered as if settled
- * (the sorted chat mode): it is split incrementally like a live stream and
- * stays out of the settled split memo, whose entries every step would evict.
  */
 const streamBlocks = (
   text: string,
   live: boolean,
   rawHtml: MarkdownRawHtmlMode = 'escape',
-  growing = live,
 ): MarkdownBlock[] => {
   // Raw HTML of a document may open in one block and close in another; the
   // allowlist pass must see it whole.
   if (!live && rawHtml === 'sanitize') return [{ raw: text, src: text, mode: 'full', highlight: true }];
 
-  const split = live || growing ? splitText(text, true) : settledSplit(text);
-  const growingTail = !live && growing ? { growing: true as const } : {};
+  const split = live ? splitText(text, true) : settledSplit(text);
   if (split.kind === 'whole') {
-    if (split.plainText) return [{ raw: text, src: text, mode: live ? 'live' : 'full', highlight: true, plainText: true, ...growingTail }];
-    return [{ raw: text, src: live ? heal(text) : text, mode: live ? 'live' : 'full', highlight: true, ...growingTail }];
+    if (split.plainText) return [{ raw: text, src: text, mode: live ? 'live' : 'full', highlight: true, plainText: true }];
+    return [{ raw: text, src: live ? heal(text) : text, mode: live ? 'live' : 'full', highlight: true }];
   }
 
   const lastIndex = split.segments.length - 1;
@@ -553,12 +543,7 @@ const streamBlocks = (
     const raw = text.slice(segment.start, segment.end);
     const isLast = index === lastIndex;
     const openFence = isLast && segment.fence !== undefined;
-    if (!live) {
-      const block: MarkdownBlock = { raw, src: raw, mode: 'full', highlight: true, segment };
-      if (isLast && growing) block.growing = true;
-      if (isLast && growing && openFence) block.openFence = true;
-      return block;
-    }
+    if (!live) return { raw, src: raw, mode: 'full', highlight: true, segment };
     const block: MarkdownBlock = {
       raw,
       // A finished block renders from its own text, as it will once the
@@ -792,6 +777,14 @@ const OPENCHAMBER_SESSION_LINK_SCHEMA = {
   validate: (text: string, pos: number): number => OPENCHAMBER_SESSION_LINK_TAIL.exec(text.slice(pos))?.[0].length ?? 0,
 };
 
+// Streamed prose with many bold or emphasis tokens made linkify search the rest
+// of the paragraph at each token on every update (openchamber/openchamber#4648).
+// With fuzzyLink off, linkify only finds links that hold `:`, `/` or `@`: every
+// scheme, `openchamber:` included, ends in `:`, a protocol-relative link starts
+// with `//`, and an email needs `@`. Text without any of them skips the search.
+// Recheck these characters when the options or schemas below change.
+const LINK_MARKER = /[:/@]/;
+
 const boundedLinkify = (): MarkedExtension => ({
   extensions: (markedLinkifyIt({ fuzzyLink: false, schemas: { 'openchamber:': OPENCHAMBER_SESSION_LINK_SCHEMA } }).extensions ?? []).map((extension) => {
     if (!('tokenizer' in extension)) return extension;
@@ -799,12 +792,12 @@ const boundedLinkify = (): MarkedExtension => ({
     return {
       ...extension,
       start(src) {
-        if (src.length > LINKIFY_SOURCE_LIMIT) return undefined;
+        if (src.length > LINKIFY_SOURCE_LIMIT || !LINK_MARKER.test(src)) return undefined;
         scanStats.linkify += src.length;
         return start?.call(this, src);
       },
       tokenizer(src, tokens) {
-        if (src.length > LINKIFY_SOURCE_LIMIT) return undefined;
+        if (src.length > LINKIFY_SOURCE_LIMIT || !LINK_MARKER.test(src)) return undefined;
         scanStats.linkify += src.length;
         return tokenizer.call(this, src, tokens);
       },
@@ -1159,7 +1152,7 @@ const liveBlockCache = new HighlightResultCache<string>({
 });
 
 const cacheFor = (block: MarkdownBlock): HighlightResultCache<string> =>
-  (block.mode === 'live' || block.growing ? liveBlockCache : fullBlockCache);
+  (block.mode === 'live' ? liveBlockCache : fullBlockCache);
 
 /** Content-addressed cache key for a markdown block. */
 const markdownBlockCacheKey = (
@@ -1174,6 +1167,7 @@ const markdownBlockCacheKey = (
 export const resetMarkdownHtmlCacheForTests = (): void => {
   fullBlockCache.clear();
   liveBlockCache.clear();
+  openFences.reset();
 };
 
 /** Test-only: entry counts per block cache, for churn/eviction assertions. */
@@ -1191,11 +1185,10 @@ export const getCachedMarkdownBlocks = (
   text: string,
   imageMode: MarkdownImageMode = 'inline',
   rawHtml: MarkdownRawHtmlMode = 'escape',
-  growing = false,
 ): RenderedBlock[] | null => {
   if (!text) return [];
 
-  const blocks = streamBlocks(text, false, rawHtml, growing);
+  const blocks = streamBlocks(text, false, rawHtml);
   const rendered: RenderedBlock[] = [];
   for (const block of blocks) {
     const contentHash = blockFingerprint(block);
@@ -1244,16 +1237,25 @@ const draftBlock = (
   return { html: sanitize(withMath), pendingHighlight: false };
 };
 
+// Open fences are sanitized by their new lines; see openFenceIncremental.ts.
+const openFences = createOpenFenceRenderer(sanitize);
+
 const parseBlock = async (
   block: MarkdownBlock,
+  id: string,
   imageMode: MarkdownImageMode,
   rawHtml: MarkdownRawHtmlMode,
-): Promise<string> => {
+): Promise<Omit<RenderedBlock, 'id'>> => {
   const draft = draftBlock(block, imageMode, rawHtml);
-  if (!draft.pendingHighlight) return draft.html;
+  if (!draft.pendingHighlight) return { html: draft.html };
   // A fence that is still open is highlighted again with every new line; its
   // intermediate results must not evict settled highlights from the cache.
-  return sanitize(await highlightCodeBlocks(draft.html, block.openFence === true));
+  const highlighted = await highlightCodeBlocks(draft.html, block.openFence === true);
+  if (!block.openFence) return { html: sanitize(highlighted) };
+  // Before its first content line, a fence's code is just marked's trailing
+  // break, which the first line will take the place of.
+  const unfinished = !block.raw.endsWith('\n') || block.raw.indexOf('\n') === block.raw.length - 1;
+  return openFences.render(highlighted, id, unfinished);
 };
 
 // Marks the id of a block painted before its code was highlighted, so the
@@ -1272,11 +1274,10 @@ export const renderMarkdownBlocksSync = (
   streaming: boolean,
   imageMode: MarkdownImageMode = 'inline',
   rawHtml: MarkdownRawHtmlMode = 'escape',
-  growing = streaming,
 ): RenderedBlock[] => {
   if (!text) return [];
 
-  return streamBlocks(text, streaming, rawHtml, growing).map((block) => {
+  return streamBlocks(text, streaming, rawHtml).map((block) => {
     const contentHash = blockFingerprint(block);
     const id = markdownBlockCacheKey(contentHash, block.mode, block.highlight, imageMode, rawHtml);
     const cache = cacheFor(block);
@@ -1320,6 +1321,9 @@ type RenderedBlock = {
   // block) to re-morph; unchanged leading blocks are skipped entirely.
   id: string;
   html: string;
+  // A still-open code fence: how to bring a block painted from one of its
+  // earlier steps up to this one without rebuilding it.
+  patchFrom?: (paintedId: string) => OpenFencePatch | null;
 };
 
 /**
@@ -1336,11 +1340,10 @@ export const renderMarkdownBlocks = async (
   streaming: boolean,
   imageMode: MarkdownImageMode = 'inline',
   rawHtml: MarkdownRawHtmlMode = 'escape',
-  growing = streaming,
 ): Promise<RenderedBlock[]> => {
   if (!text) return [];
 
-  const blocks = streamBlocks(text, streaming, rawHtml, growing);
+  const blocks = streamBlocks(text, streaming, rawHtml);
   return Promise.all(
     blocks.map(async (block) => {
       const contentHash = blockFingerprint(block);
@@ -1350,9 +1353,9 @@ export const renderMarkdownBlocks = async (
       if (cached !== undefined) {
         return { id, html: cached };
       }
-      const html = await parseBlock(block, imageMode, rawHtml);
-      cache.set(id, html, utf16Bytes(id) + utf16Bytes(html));
-      return { id, html };
+      const rendered = await parseBlock(block, id, imageMode, rawHtml);
+      cache.set(id, rendered.html, utf16Bytes(id) + utf16Bytes(rendered.html));
+      return { id, ...rendered };
     }),
   );
 };

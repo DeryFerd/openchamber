@@ -778,6 +778,25 @@ export const createOpenChamberControlService = (dependencies) => {
         const link = input.link ?? { url: input.url, title: input.title, kind: input.kind, identifier: input.identifier };
         return sessionLinks.link({ sessionId: sessionID, directory, link });
       }
+      if (action === 'session.moveToWorktree') {
+        assertSingleScope(input);
+        // The calling session by default: the agent moves its own work.
+        const explicitSessionID = asNonEmptyString(input.sessionId);
+        const sessionID = explicitSessionID || asNonEmptyString(options.contextSessionId);
+        if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
+        // Where the session lives now, which is where the changes are taken
+        // from; never a directory of the caller's choosing, so the action
+        // cannot carry away another checkout's changes.
+        const directory = (await resolveSessionDirectory(sessionID)) || asNonEmptyString(contextDirectory);
+        const worktree = { name: asNonEmptyString(input.worktree)?.trim() };
+        const branch = asNonEmptyString(input.branch);
+        if (branch) worktree.branchName = branch.trim();
+        const startRef = asNonEmptyString(input.startRef);
+        if (startRef) worktree.startRef = startRef.trim();
+        const payload = { worktree };
+        if (directory) payload.directory = directory;
+        return sessionService.moveToWorktree(sessionID, payload);
+      }
       if (action.startsWith('session.')) {
         const sessionID = asNonEmptyString(input.sessionId);
         if (action !== 'session.list' && !sessionID) throw new OpenChamberControlError('sessionId is required', 400);

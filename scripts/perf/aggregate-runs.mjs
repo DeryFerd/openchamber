@@ -12,11 +12,12 @@
  *   node scripts/perf/aggregate-runs.mjs results/baseline/session-stream-300cps-* --output results/baseline/session-stream-300cps.json
  */
 
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { writeFileSync } from "node:fs"
+import { resolve } from "node:path"
 import process from "node:process"
 
 import { percentile, round } from "./metrics.mjs"
+import { invalidReasons, readSummary } from "./run-summary.mjs"
 
 const HELP = `Usage: node scripts/perf/aggregate-runs.mjs <run directory>... [--output <file.json>]
 
@@ -35,23 +36,6 @@ const parseArgs = (argv) => {
   }
   if (options.directories.length === 0) throw new Error("Pass at least one run directory.")
   return options
-}
-
-const readSummary = (directory) => {
-  if (!existsSync(directory)) return null
-  const file = readdirSync(directory).find((name) => name.endsWith("-summary.json"))
-  return file ? { file: join(directory, file), data: JSON.parse(readFileSync(join(directory, file), "utf8")) } : null
-}
-
-// Reasons a run measured nothing, from the flags the profilers write.
-const invalidReasons = (data) => {
-  const reasons = []
-  if (data.renderedStream === false) reasons.push("never rendered the stream")
-  if (data.assistantResponse && data.assistantResponse.responded === false) reasons.push("no assistant response")
-  if (data.reachedIdle === false) reasons.push("never reached idle")
-  if (data.instrumented !== false && data.metrics?.taskCount === 0) reasons.push("trace had no tasks")
-  if (data.frameLiveness && Number(data.frameLiveness.framesPerSecond ?? data.frameLiveness) < 10) reasons.push("renderer throttled")
-  return reasons
 }
 
 const main = () => {
