@@ -479,6 +479,7 @@ Important properties:
 - status, branches, log, identity, repository probes, and prefetch diffs commit through runtime and per-channel generations
 - status mutations advance a revision so older refreshes cannot undo optimistic or confirmed index changes
 - a successful status-affecting git mutation also advances that revision: the HTTP adapter's cache invalidation notifies the store through `lib/gitStatusInvalidation.ts` (the VS Code bridge adapter has no client-side status cache, so it emits nothing today)
+- `lastStatusFetch` advances on every completed status read; `lastStatusChange` advances only when the status actually changed, including ref-only changes (a new commit moves `ahead` with no file edits). Consumers that invalidate on content, such as the Branch diff revision in `hooks/useBranchComparisonBase.ts`, key on `lastStatusChange` so a no-op refresh does not refetch every expanded file
 - `fetchStatus({ force: true })` and `fetchAll({ force: true })` cross both the store and runtime transport caches; a forced reconciliation must reach the active runtime rather than reuse an unexpired browser status snapshot
 - status requests do not start while a managed worktree bootstrap is pending, and a response admitted before bootstrap began is discarded if it completes after the directory enters `pending`; the `--no-checkout` population window is not user working-tree state
 - branch persistence is versioned, bounded, runtime-scoped, and claims the ambiguous legacy cache once

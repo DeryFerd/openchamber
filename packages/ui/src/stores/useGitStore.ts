@@ -887,7 +887,12 @@ export const useGitStore = create<GitStore>()(
                 indexRevision: indexStatusChanged ? currentDirState.indexRevision + 1 : currentDirState.indexRevision,
                 lastRepoCheckAt: shouldProbeRepository ? now : currentDirState.lastRepoCheckAt,
                 lastStatusFetch: Date.now(),
-                lastStatusChange: hasFileContentChange ? Date.now() : currentDirState.lastStatusChange,
+                // This branch only runs when the status actually changed, so the
+                // signal advances here and stays put on a no-op refresh. It
+                // covers ref-only changes too (a new commit moves `ahead` with
+                // no file edits), which a content-only test would miss and the
+                // Branch diff would then never refresh for.
+                lastStatusChange: Date.now(),
               });
               set({ directories: newDirectories });
             } else {

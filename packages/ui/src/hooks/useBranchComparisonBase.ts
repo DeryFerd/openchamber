@@ -31,8 +31,12 @@ export function useBranchComparisonBase(
 ) {
   const { branches, remoteNames, primaryRemote, readContext } = repository;
   const runtimeKey = useGitStore((state) => state.runtimeKey);
-  const statusFetchedAt = useGitStore((state) => enabled && directory
-    ? state.directories.get(directory)?.lastStatusFetch ?? 0
+  // The revision keys on when the status last CHANGED, not when it was last
+  // fetched: a no-op refresh (a read-only tool call asks for one) advances
+  // `lastStatusFetch` but leaves the branch comparison identical, and keying on
+  // it re-fetched every expanded file for nothing.
+  const statusChangedAt = useGitStore((state) => enabled && directory
+    ? state.directories.get(directory)?.lastStatusChange ?? 0
     : 0);
   const key = JSON.stringify([runtimeKey, directory, branch]);
   const overrideKey = directory && branch ? gitBaseBranchEntryKey(directory, branch) : null;
@@ -60,7 +64,7 @@ export function useBranchComparisonBase(
         setDetected((previous) => previous?.key === key ? previous : { key, base: null });
       });
     return () => { cancelled = true; };
-  }, [branch, directory, enabled, key, statusFetchedAt]);
+  }, [branch, directory, enabled, key, statusChangedAt]);
 
   const detectedSettled = detected?.key === key;
   const createdFrom = detectedSettled ? detected.base : null;
@@ -88,6 +92,6 @@ export function useBranchComparisonBase(
     source,
     // Settled once a base is found, or once every candidate has answered.
     resolved: Boolean(resolution) || (detectedSettled && branches !== null),
-    revision: JSON.stringify([runtimeKey, statusFetchedAt]),
+    revision: JSON.stringify([runtimeKey, statusChangedAt]),
   };
 }

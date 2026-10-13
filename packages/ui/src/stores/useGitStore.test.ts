@@ -374,6 +374,20 @@ describe('useGitStore', () => {
     expect(useGitStore.getState().getDirectoryState('/repo')?.status?.files).toEqual([]);
   });
 
+  test('advances lastStatusChange on a real status change but not on a no-op refresh', async () => {
+    setDirectoryStatus(createStatus());
+
+    // A refresh that returns the same status is a no-op for diff invalidation.
+    await useGitStore.getState().fetchStatus('/repo', createGitApi(async () => createStatus()));
+    const afterNoop = useGitStore.getState().getDirectoryState('/repo')?.lastStatusChange;
+    expect(afterNoop).toBe(0);
+
+    // A ref-only change (a new commit moves `ahead`, no file edits) still
+    // changes the branch range and must advance the signal.
+    await useGitStore.getState().fetchStatus('/repo', createGitApi(async () => ({ ...createStatus(), ahead: 3 })));
+    expect(useGitStore.getState().getDirectoryState('/repo')?.lastStatusChange).toBeGreaterThan(afterNoop ?? 0);
+  });
+
   test('does not publish a status response after bootstrap becomes pending', async () => {
     setDirectoryStatus(createStatus());
     const request = createDeferred<GitStatus>();
