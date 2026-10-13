@@ -1,4 +1,4 @@
-import { asNonEmptyString } from '../shared/guards.js';
+import { asNonEmptyString, isBoolean } from '../shared/guards.js';
 import path from 'node:path';
 import { OpenCode } from '@opencode/client';
 import { OpenChamberControlError, asControlError } from './error.js';
@@ -452,6 +452,17 @@ export const createOpenChamberControlService = (dependencies) => {
   };
 
   const executeSessionAction = async (action, input, contextDirectory, signal, contextSessionId) => {
+    // The tool path forwards raw JSON, so a boolean parameter can arrive as the
+    // string "true". Both of these are compared with `=== true` below, which
+    // would read a string as false and silently drop the behavior: a dispatch
+    // whose result is never delivered, or a call that returns before the turn
+    // it asked to wait for. Reject a non-boolean loudly instead.
+    if (input.wait !== undefined && !isBoolean(input.wait)) {
+      throw new OpenChamberControlError('wait must be a boolean', 400);
+    }
+    if (input.returnResult !== undefined && !isBoolean(input.returnResult)) {
+      throw new OpenChamberControlError('returnResult must be a boolean', 400);
+    }
     if (input.timeout !== undefined && input.wait !== true) throw new OpenChamberControlError('timeout requires wait', 400);
     if (input.lastAssistant === true && input.wait !== true) throw new OpenChamberControlError('lastAssistant requires wait', 400);
     assertSingleScope(input);

@@ -50,6 +50,12 @@ other.
   result carries `resultDelivery`: `pending` with a note for the agent, or
   `not-scheduled` with the reason (the prompt never landed, or registering
   failed); the session keeps running either way, so neither is thrown.
+- `returnResult` and `wait` must be booleans when present. Both are compared
+  with `=== true`, so a string `"true"` (the tool path forwards raw JSON, and a
+  model or harness can stringify a boolean) would read as false: a dispatch
+  whose result is never delivered, or a wait that returns at once. A
+  non-boolean is rejected with a 400 before anything is created, the same way
+  `schedule.toggle` requires its `disabled` boolean.
 - Validation that protects side effects runs before session creation or
   dispatch. An explicitly requested model, agent, or variant is checked against
   the directory's own OpenCode agent and provider lists before any session,
