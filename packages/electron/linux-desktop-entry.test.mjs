@@ -16,14 +16,19 @@ const makeLab = async (t) => {
   await fs.mkdir(path.dirname(iconSource), { recursive: true });
   await fs.writeFile(iconSource, ICON);
   const dataHome = path.join(root, 'data');
+  // A hermetic system data root: XDG_DATA_DIRS is scanned for a system-package
+  // entry, so tests must not point it at the host's /usr/share.
+  const systemDataDir = path.join(root, 'system-data');
   const env = {
     APPIMAGE: path.join(root, 'Downloads', 'OpenChamber-2.3.0-linux-x86_64.AppImage'),
     APPDIR: appDir,
     XDG_DATA_HOME: dataHome,
+    XDG_DATA_DIRS: systemDataDir,
   };
   return {
     env,
     homeDir: root,
+    systemDataDir,
     desktopPath: path.join(dataHome, 'applications', 'openchamber.desktop'),
     iconPath: path.join(dataHome, 'icons/hicolor/512x512/apps/openchamber.png'),
   };
@@ -114,6 +119,57 @@ test('another entry that starts this AppImage counts as an integration', async (
   const result = await reconcileAppImageDesktopEntry({ env: lab.env, homeDir: lab.homeDir });
   assert.equal(result.status, 'external');
   await assert.rejects(fs.access(lab.desktopPath));
+});
+
+test('a system-package entry under XDG_DATA_DIRS withdraws ours', async (t) => {
+  const lab = await makeLab(t);
+  await reconcileAppImageDesktopEntry({ env: lab.env, homeDir: lab.homeDir });
+  await writeEntry(path.join(lab.systemDataDir, 'applications', 'openchamber.desktop'),
+    '[Desktop Entry]\nName=OpenChamber\nExec=/usr/bin/openchamber\nStartupWMClass=openchamber\n');
+
+  const result = await reconcileAppImageDesktopEntry({ env: lab.env, homeDir: lab.homeDir });
+  assert.deepEqual(result, { status: 'external', removed: true });
+  await assert.rejects(fs.access(lab.desktopPath));
+  await assert.rejects(fs.access(lab.iconPath));
+});
+
+test('a packaged run with a system entry withdraws ours even without APPIMAGE', async (t) => {
+  const lab = await makeLab(t);
+  await reconcileAppImageDesktopEntry({ env: lab.env, homeDir: lab.homeDir });
+  await writeEntry(path.join(lab.systemDataDir, 'applications', 'openchamber.desktop'),
+    '[Desktop Entry]\nName=OpenChamber\nExec=/usr/bin/openchamber\nStartupWMClass=openchamber\n');
+  const packaged = { ...lab.env, APPIMAGE: '', APPDIR: '' };
+
+  const result = await reconcileAppImageDesktopEntry({ env: packaged, homeDir: lab.homeDir });
+  assert.deepEqual(result, { status: 'external', removed: true });
+  await assert.rejects(fs.access(lab.desktopPath));
+});
+
+test('a packaged run with no APPIMAGE does not treat an unrelated Exec as an integration', async (t) => {
+  const lab = await makeLab(t);
+  await reconcileAppImageDesktopEntry({ env: lab.env, homeDir: lab.homeDir });
+  // A system entry that neither claims our window class nor starts the AppImage.
+  await writeEntry(path.join(lab.systemDataDir, 'applications', 'other.desktop'),
+    '[Desktop Entry]\nName=Other\nExec=/usr/bin/other\n');
+  const packaged = { ...lab.env, APPIMAGE: '', APPDIR: '' };
+
+  const result = await reconcileAppImageDesktopEntry({ env: packaged, homeDir: lab.homeDir });
+  assert.deepEqual(result, { status: 'not-appimage' });
+  // Our entry is left in place: no integration was proven.
+  assert.match(await fs.readFile(lab.desktopPath, 'utf8'), /^StartupWMClass=openchamber$/m);
+});
+
+test("the AppImage's own bundled entry under APPDIR is not an integration", async (t) => {
+  const lab = await makeLab(t);
+  // The launcher prepends its mount's usr/share to XDG_DATA_DIRS, and the image
+  // carries its own openchamber.desktop there; that is not another integration.
+  const bundledEntry = path.join(lab.env.APPDIR, 'usr/share/applications/openchamber.desktop');
+  await writeEntry(bundledEntry, '[Desktop Entry]\nName=OpenChamber\nExec=AppRun\nStartupWMClass=openchamber\n');
+  const env = { ...lab.env, XDG_DATA_DIRS: path.join(lab.env.APPDIR, 'usr/share') };
+
+  const result = await reconcileAppImageDesktopEntry({ env, homeDir: lab.homeDir });
+  assert.deepEqual(result, { status: 'integrated', changed: true, desktopPath: lab.desktopPath });
+  assert.match(await fs.readFile(lab.desktopPath, 'utf8'), /^StartupWMClass=openchamber$/m);
 });
 
 test('nothing is written outside an AppImage or without its icon', async (t) => {
