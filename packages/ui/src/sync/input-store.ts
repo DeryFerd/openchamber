@@ -67,8 +67,7 @@ export const prepareLocalAttachments = async (
   if (!preparedFiles || preparedFiles.length === 0) return
 
   // Resolved once, before preparation splits a document into text and images:
-  // only the top-level file has an on-disk path, and it belongs to the text
-  // entry that keeps the original filename.
+  // only the top-level file has an on-disk path.
   const agentPath = pathForDroppedFile(file) ?? undefined
 
   const sourceDocumentId = preparedFiles.length > 1
@@ -88,7 +87,13 @@ export const prepareLocalAttachments = async (
       source: "local",
       sourceDocumentId,
     }
-    if (agentPath && prepared.file.name === file.name) attached.agentPath = agentPath
+    // Only a genuine pass-through keeps the path: a preparation that built a
+    // new File (HAR redaction, notebook text, HEIC conversion, a document
+    // split) changed the content, so the on-disk original is not what the
+    // attachment holds, and pointing the model at it would hand back exactly
+    // the content that preparation stripped. Identity is the check, not the
+    // name, because those preparations keep the original name.
+    if (agentPath && prepared.file === file) attached.agentPath = agentPath
     attachedFiles.push(attached)
   }
   return attachedFiles

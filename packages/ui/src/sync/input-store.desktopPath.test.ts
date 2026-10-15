@@ -59,3 +59,22 @@ test('a desktop-dropped file carries its on-disk path while the chip label stays
   expect(file?.filename).toBe('report.txt');
   expect(file?.agentPath).toBe('/Users/me/Documents/report.txt');
 });
+
+test('a content-transformed attachment does not carry the path to the unsanitized original', async () => {
+  const { useInputStore } = await import('./input-store');
+  useInputStore.getState().clearAttachedFiles();
+
+  // A HAR is credential-redacted at intake: `prepareStructuredText` builds a
+  // new File that keeps the original name. Handing the model the on-disk path
+  // would point it at the unredacted original, so no path travels — the model
+  // gets the sanitized content under the basename, exactly as before.
+  const har = JSON.stringify({ log: { entries: [{ request: { headers: [{ name: 'authorization', value: 'Bearer secret' }] } }] } });
+  const attached = await useInputStore.getState().addAttachedFile(
+    new File([har], 'capture.har', { type: 'application/json' }),
+  );
+
+  expect(attached).toBe(true);
+  const [file] = useInputStore.getState().attachedFiles;
+  expect(file?.filename).toBe('capture.har');
+  expect(file?.agentPath).toBeUndefined();
+});
