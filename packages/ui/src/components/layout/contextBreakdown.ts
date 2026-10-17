@@ -12,7 +12,8 @@
  * The window is therefore the denominator for every segment, and `other` is the
  * genuine remainder — the system prompt, tool and MCP schemas, skills, and the
  * error in the character estimate, none of which a per-message character count
- * can name. When the window is unknown (compacted, or a turn that reported no
+ * can name. On a cache-heavy session the largest part of `other` is the cached
+ * prompt re-read plus the turn's own output and reasoning, not the schemas. When the window is unknown (compacted, or a turn that reported no
  * tokens) the estimate is all there is and becomes its own denominator, and
  * when the estimate runs past the window the total grows to hold it so no
  * segment can exceed the bar.
@@ -30,25 +31,37 @@ type ContextBreakdown = ContextBuckets & {
   total: number;
 };
 
+type BreakdownInput = {
+  /** The used-window figure the readout shows (the newest turn's reported total). */
+  windowTokens: number;
+  /**
+   * A completed compaction record can still carry the summarizing turn's
+   * tokens, but the readout shows `—` because the fill is unknown. The bar
+   * must not denominate against that pre-compaction window either.
+   */
+  compacted?: boolean;
+};
+
 /**
- * `estimate` is the whole-conversation character estimate in tokens; `windowTokens`
- * is the used-window figure the readout shows (the newest turn's reported total).
+ * `estimate` is the whole-conversation character estimate in tokens.
  */
 export const composeContextBreakdown = (
   estimate: ContextBuckets,
-  windowTokens: number,
+  { windowTokens, compacted = false }: BreakdownInput,
 ): ContextBreakdown => {
-  const window = Number.isFinite(windowTokens) && windowTokens > 0 ? windowTokens : 0;
+  const usable = compacted ? 0 : windowTokens;
+  const window = Number.isFinite(usable) && usable > 0 ? usable : 0;
   const estimated = estimate.user + estimate.assistant + estimate.tool + estimate.other;
   // The window is the real fill, but a conversation longer than the model keeps
   // can estimate past it; the total grows so `other` stays a non-negative
-  // remainder instead of a clamp that hides the overrun.
+  // remainder instead of a clamp that hides the overrun. `other` is therefore
+  // `total - estimated` by construction, never negative.
   const total = Math.max(window, estimated);
   return {
     user: estimate.user,
     assistant: estimate.assistant,
     tool: estimate.tool,
-    other: Math.max(0, total - estimated),
+    other: total - estimated,
     total,
   };
 };
