@@ -61,7 +61,10 @@ function isOpenTarget(event: Event): boolean {
  * so `event.target` alone would hand the terminal's paste to the chat.
  */
 function focusedElementTakesInput(): boolean {
-    return takesInputItself(document.activeElement);
+    // Only a field that takes text itself keeps the paste. A focused button or
+    // link consumes nothing, so a paste with no text target still belongs to
+    // the composer — the same line `refocusAfterWindowFocus` draws.
+    return Boolean(document.activeElement?.closest(EDITABLE_SELECTOR));
 }
 
 function isOnScreen(editor: HTMLElement | null): editor is HTMLElement {
