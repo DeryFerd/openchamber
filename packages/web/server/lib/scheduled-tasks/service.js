@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { discoverLoopFiles, loopFingerprint, parseLoopDefinition, setLoopFileEnabled } from './loops.js';
+import { createProjectDirectoryOwnership } from './project-ownership.js';
 
 // Same scope rule the scheduler applies: a file under the project's own
 // `.agents/loops` is a repository loop, even where it is also the user folder.
@@ -16,12 +17,15 @@ export const createScheduledTaskService = (dependencies) => {
     projectConfigRuntime,
     scheduledTasksRuntime,
     chatsScope = null,
+    resolvePrimaryWorktreeRoot,
   } = dependencies;
 
   const listProjects = async () => {
     const settings = await readSettingsFromDiskMigrated();
     return sanitizeProjects(settings?.projects || []);
   };
+
+  const { projectOwningDirectory } = createProjectDirectoryOwnership({ listProjects, resolvePrimaryWorktreeRoot });
 
   // Resolves a project or the chats scope; every method below keys the
   // runtime and config by the returned id, never by the raw request value.
@@ -47,8 +51,9 @@ export const createScheduledTaskService = (dependencies) => {
     }
     if (!requestedDirectory) throw new OpenChamberControlError('projectId or directory is required', 400);
     const resolvedDirectory = path.resolve(requestedDirectory);
-    const projects = await listProjects();
-    const project = projects.find((entry) => path.resolve(entry.path) === resolvedDirectory);
+    // A session in a linked worktree schedules into the project that owns it,
+    // by the same rule the target picker and validation use.
+    const project = await projectOwningDirectory(resolvedDirectory);
     if (project) return project.id;
     // An agent working in a chat schedules into the chats scope.
     if (chatsScope?.contains(resolvedDirectory)) return chatsScope.id;

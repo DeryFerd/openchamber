@@ -36,6 +36,17 @@ scheduled like one more project, with three differences:
 The chats root is `OPENCHAMBER_CHATS_DIR` (default `<config root>/chats`). The
 VS Code extension has no chats, so its UI does not offer the scope.
 
+## Directory resolution
+
+An agent-facing action may name a project, or let the server infer it from the
+calling session's directory. Inference uses the same ownership rule as the
+target picker and validation (`project-ownership.js`, shared with
+`existing-session.js`): an exact project root wins, and a directory inside a
+linked Git worktree resolves to the project that owns it through
+`resolvePrimaryWorktreeRoot`. A directory no registered project owns still
+fails with 404, and a directory inside the chats root resolves to the chats
+scope after the project check, as before.
+
 ## Cross-instance occurrence claiming
 
 Multiple OpenChamber server processes can share the same on-disk project config

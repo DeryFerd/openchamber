@@ -27,6 +27,7 @@ const createService = (overrides = {}) => {
     projectConfigRuntime,
     scheduledTasksRuntime,
     chatsScope: overrides.chatsScope ?? null,
+    resolvePrimaryWorktreeRoot: overrides.resolvePrimaryWorktreeRoot,
   });
   return { service, projectConfigRuntime, scheduledTasksRuntime };
 };
@@ -318,6 +319,29 @@ describe('scheduled-task service chats scope', () => {
     await expect(service.resolveProjectID({ directory: `${chatsScope.root}/2026-09-30/session-a` })).resolves.toBe(chatsScope.id);
     await expect(service.resolveProjectID({ directory: '/repo' })).resolves.toBe('project-test');
     await expect(service.resolveProjectID({ directory: `${chatsScope.root}-other/session-a` })).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('resolves a linked worktree to the project that owns it', async () => {
+    // A session can run in a linked worktree of a project without the worktree
+    // being a project of its own. Ownership comes from Git, the same rule the
+    // target picker and validation already use.
+    const { service } = createService({
+      resolvePrimaryWorktreeRoot: async (directory) => (
+        path.resolve(directory).includes('worktrees') ? { root: path.resolve('/repo') } : null
+      ),
+    });
+
+    await expect(service.resolveProjectID({ directory: '/repo/worktrees/feature' }))
+      .resolves.toBe('project-test');
+  });
+
+  it('keeps refusing a directory no registered project owns', async () => {
+    const { service } = createService({
+      resolvePrimaryWorktreeRoot: async () => ({ root: path.resolve('/elsewhere') }),
+    });
+
+    await expect(service.resolveProjectID({ directory: '/repo/worktrees/feature' }))
+      .rejects.toMatchObject({ statusCode: 404 });
   });
 
   it('rejects the chats id when the server has no chats scope', async () => {

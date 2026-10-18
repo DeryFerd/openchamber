@@ -3,21 +3,15 @@ import { z } from 'zod';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { asNonEmptyString } from '../shared/guards.js';
 import { expandSnippets } from '../opencode/snippets.js';
+import { createProjectDirectoryOwnership } from './project-ownership.js';
 
 export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueRuntime, createClient, listProjects, chatsScope, resolvePrimaryWorktreeRoot, isSessionArchived, emitTaskRunEvent }) => {
   const admissions = new Set();
 
-  // The membership rule, in one place: a save or run and the picker's
-  // discovery both ask this, so the two can never disagree about whether a
-  // directory belongs to a project. Ownership comes from Git through
-  // `resolvePrimaryWorktreeRoot`, never from the renderer's worktree topology.
-  const ownsDirectory = async (project, directory) => {
-    if (!project || !directory) return false;
-    if (path.resolve(directory) === path.resolve(project.path)) return true;
-    if (!resolvePrimaryWorktreeRoot) return false;
-    const owner = await resolvePrimaryWorktreeRoot(directory);
-    return Boolean(owner?.root) && path.resolve(owner.root) === path.resolve(project.path);
-  };
+  // The membership rule, in one place (`project-ownership.js`): a save or run
+  // and the picker's discovery both ask it, so the two can never disagree
+  // about whether a directory belongs to a project.
+  const { ownsDirectory } = createProjectDirectoryOwnership({ listProjects, resolvePrimaryWorktreeRoot });
 
   const validateTarget = async (projectId, targetSessionId) => {
     if (!z.string().regex(/^[A-Za-z0-9_-]{4,128}$/).safeParse(targetSessionId).success) {
