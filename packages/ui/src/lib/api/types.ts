@@ -1349,6 +1349,8 @@ export interface ProjectEntry {
   id: string;
   path: string;
   label?: string;
+  /** Where `label` came from: the folder name, or a name the user typed. */
+  labelSource?: 'auto' | 'manual';
   icon?: string | null;
   iconImage?: {
     mime: string;
