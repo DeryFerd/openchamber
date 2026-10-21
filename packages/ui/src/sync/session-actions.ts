@@ -13,6 +13,7 @@ import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { opencodeClient, type SyntheticContextInput } from "@/lib/opencode/client"
+import { findMessagePageItem } from "@/lib/opencode/messagePaging"
 import { toJsonRecord } from "@/lib/opencode/json"
 import { ascendingId } from "@/lib/opencode/ids"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
@@ -525,17 +526,8 @@ async function fetchSessionMessages(sessionId: string, directory?: string | null
  * target older than that must be searched for across pages, not assumed gone.
  */
 async function findSessionMessageById(sessionId: string, messageId: string, directory?: string | null): Promise<Message | null> {
-  const seenCursors = new Set<string>()
-  let cursor: string | undefined
-  for (;;) {
-    const page = await opencodeClient.getSessionMessages(sessionId, cursor ? { cursor } : undefined, directory)
-    const found = page.items.map(({ info }) => info).find((message) => message.id === messageId)
-    if (found) return found
-    const next = page.cursor.next
-    if (!next || seenCursors.has(next)) return null
-    seenCursors.add(next)
-    cursor = next
-  }
+  const found = await findMessagePageItem(sessionId, (item) => item.info.id === messageId, {}, directory)
+  return found?.info ?? null
 }
 
 /**
