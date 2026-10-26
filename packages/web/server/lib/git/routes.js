@@ -975,6 +975,13 @@ export function registerGitRoutes(app, {
       });
     } catch (error) {
       if (sendGitPathError(res, error)) return;
+      // A non-repository directory is a normal state (e.g. a chats session
+      // folder), not a server fault: the status and check routes answer the
+      // same class of error with a soft payload.
+      if (isNonRepoGitError(error)) {
+        console.warn('Git file diff skipped for non-repository path:', extractGitErrorText(error));
+        return res.json({ original: '', modified: '', path: req.query.path, isBinary: false, submodule: null });
+      }
       console.error('Failed to get git file diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get git file diff' });
     }

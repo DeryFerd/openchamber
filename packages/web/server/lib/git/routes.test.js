@@ -5,6 +5,7 @@ const gitLibraries = {
   unstageFiles: vi.fn(),
   isGitRepository: vi.fn(),
   getStatus: vi.fn(),
+  getFileDiff: vi.fn(),
   createWorktree: vi.fn(),
   seedBranchTaskTitle: vi.fn(),
   markGeneratedBranchName: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock('./index.js', () => ({
   unstageFiles: gitLibraries.unstageFiles,
   isGitRepository: gitLibraries.isGitRepository,
   getStatus: gitLibraries.getStatus,
+  getFileDiff: gitLibraries.getFileDiff,
   createWorktree: gitLibraries.createWorktree,
   seedBranchTaskTitle: gitLibraries.seedBranchTaskTitle,
   markGeneratedBranchName: gitLibraries.markGeneratedBranchName,
@@ -943,6 +945,48 @@ describe('git routes status discovery', () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject({ isGitRepository: false });
     expect(gitLibraries.getStatus).toHaveBeenCalledWith('/opened/project', { mode: undefined });
+  });
+
+  it('answers a non-repository directory with an empty file diff', async () => {
+    gitLibraries.getFileDiff.mockRejectedValue(
+      Object.assign(new Error('fatal: not a git repository (or any of the parent directories): .git'), {
+        task: { commands: ['rev-parse'] },
+      }),
+    );
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/file-diff')(
+      { query: { directory: '/opened/chats/session-folder', path: 'notes.md' } },
+      response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      original: '',
+      modified: '',
+      path: 'notes.md',
+      isBinary: false,
+      submodule: null,
+    });
+  });
+
+  it('keeps path error codes ahead of the non-repository answer for file diffs', async () => {
+    gitLibraries.getFileDiff.mockRejectedValue(
+      Object.assign(new Error('notes.md vanished'), { code: 'path_not_found' }),
+    );
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/file-diff')(
+      { query: { directory: '/opened/project', path: 'notes.md' } },
+      response,
+    );
+
+    expect(response.statusCode).toBe(404);
+    expect(response.body).toEqual({ error: 'notes.md vanished', code: 'path_not_found' });
   });
 
   it('uses the opened project path from query arrays without falling back to cwd', async () => {
