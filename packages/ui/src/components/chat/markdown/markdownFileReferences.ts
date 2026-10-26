@@ -1,4 +1,4 @@
-import { BLOCK_PATH_TOKEN_RE, localPathFromFileUrl, normalizeReferencePath, parseFileReference } from '../fileReferenceParser';
+import { BLOCK_PATH_TOKEN_RE, decodeFilePathHref, localPathFromFileUrl, normalizeReferencePath, parseFileReference } from '../fileReferenceParser';
 import { fileReferenceExists, findUniqueFileByName } from '../fileReferenceStat';
 import { isAbsoluteFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import type { ConfirmedCodePath } from './streamdownCode';
@@ -70,7 +70,7 @@ const isLikelyFilePath = (path: string, purpose: FileReferencePurpose): boolean 
 export function resolveMarkdownFile(raw: string, directory: string, purpose: FileReferencePurpose = 'probe') {
   // Most code tokens are paths, not URLs. Avoid constructing and throwing a URL
   // for every ordinary identifier/path in a highlighted fence.
-  const reference = parseFileReference(/^\s*file:/i.test(raw) ? localPathFromFileUrl(raw) ?? raw : raw);
+  const reference = parseFileReference(/^\s*file:/i.test(raw) ? localPathFromFileUrl(raw) ?? raw : decodeFilePathHref(raw));
   if (!reference || !directory || !isLikelyFilePath(reference.path, purpose)) return null;
   const path = isAbsoluteFilePath(reference.path) ? normalizeReferencePath(reference.path) : toAbsoluteFilePath(directory, reference.path);
   return path ? { ...reference, resolvedPath: path } : null;

@@ -31,6 +31,16 @@ describe('resolveMarkdownFile', () => {
     expect(resolveMarkdownFile('file:///repo/data.001', '/repo', 'click')?.resolvedPath).toBe('/repo/data.001');
   });
 
+  test('decodes the percent-encoded hrefs the markdown renderer hands over (#5660)', () => {
+    const relative = resolveMarkdownFile('docs/%E4%B8%AD%E6%96%87/%E7%A4%BA%E4%BE%8B.md', '/repo', 'click');
+    expect(relative?.resolvedPath).toBe('/repo/docs/中文/示例.md');
+    const absolute = resolveMarkdownFile('/repo/docs/%E4%B8%AD%E6%96%87/%E7%A4%BA%E4%BE%8B.md', '/repo', 'click');
+    expect(absolute?.resolvedPath).toBe('/repo/docs/中文/示例.md');
+    // Valid escapes decode (%25 is a literal '%'); invalid sequences stay as written.
+    expect(resolveMarkdownFile('/repo/docs/50%25off.md', '/repo', 'click')?.resolvedPath).toBe('/repo/docs/50%off.md');
+    expect(resolveMarkdownFile('/repo/docs/%ZZbad.md', '/repo', 'click')?.resolvedPath).toBe('/repo/docs/%ZZbad.md');
+  });
+
   test('code blocks probe only path-like tokens that pass the probe rules', async () => {
     const asked: string[] = [];
     const confirmed = await confirmCodePaths('gpt-5.4\nuser@gmail.com\nblock/entry.ts:7\n', '/repo', 80, async (raw) => {

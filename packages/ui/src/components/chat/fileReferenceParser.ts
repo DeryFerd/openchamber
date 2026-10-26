@@ -22,6 +22,20 @@ const KNOWN_BASENAME_PATTERN = Array.from(KNOWN_FILE_BASENAMES)
 
 export const normalizeReferencePath = (value: string): string => normalizeFilePath(value);
 
+/**
+ * A markdown renderer percent-encodes hrefs, so a link to a path holding
+ * non-ASCII characters arrives here escaped. Decode it the way `file:` URLs
+ * are decoded; input without escapes is returned unchanged and a sequence
+ * that is not valid escaping stays literal.
+ */
+export const decodeFilePathHref = (value: string): string => {
+    try {
+        return decodeURIComponent(value);
+    } catch {
+        return value;
+    }
+};
+
 export const localPathFromFileUrl = (value: string): string | null => {
     let parsed: URL;
     try {
