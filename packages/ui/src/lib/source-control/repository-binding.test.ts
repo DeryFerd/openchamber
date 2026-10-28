@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { SourceControlBindingRead } from '@/lib/api/types';
+import { clearWorktreeBootstrapState, setWorktreeBootstrapState } from '@/lib/worktrees/worktreeBootstrap';
 import { RepositoryBindingOwner } from './repository-binding';
 
 const endpoint = { displayUrl: 'https://github.com/team/repo', fingerprint: 'fetch' };
@@ -279,5 +280,23 @@ describe('repository binding authority', () => {
     mutation.release();
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(owner.snapshot(scope).status).toBe('idle');
+  });
+
+  test('a terminally failed bootstrap releases the wait and reads the binding anyway (#5811)', async () => {
+    setWorktreeBootstrapState('/failed-worktree', {
+      status: 'failed',
+      error: 'checkout hydration timed out',
+      updatedAt: 1,
+    });
+    try {
+      const owner = new RepositoryBindingOwner(() => 'runtime');
+      const scope = owner.scope('/failed-worktree');
+      const snapshot = await owner.read(scope, { repositoryBinding: async () => bound() });
+      expect(snapshot.status).toBe('ready');
+      expect(snapshot.read?.binding).toEqual(bound().binding);
+      expect(snapshot.error).toBeNull();
+    } finally {
+      clearWorktreeBootstrapState('/failed-worktree');
+    }
   });
 });

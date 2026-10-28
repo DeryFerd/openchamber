@@ -1302,4 +1302,45 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(upstreamBody).toEqual({ prompt: 'hello' });
     expect(errorSpy).toHaveBeenCalledWith('[proxy] OpenCode proxy error: method=POST route=/api/other function=onApiProxyError class=connection_reset message="socket hang up"');
   });
+
+  it('lets directory-scoped requests through when worktree bootstrap has failed (#5811)', async () => {
+    const upstream = express();
+    upstream.get('/api/session', (_req, res) => res.json({ data: [], cursor: {} }));
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+      // The retained record says the hydration failed; population stopped, so
+      // waiting can never release the request.
+      readWorktreeBootstrapStatus: async () => ({
+        status: 'failed',
+        error: 'checkout hydration timed out',
+        updatedAt: 1,
+      }),
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(
+      `http://127.0.0.1:${proxyPort}/api/session?directory=${encodeURIComponent('/work/tree')}`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: [], cursor: {} });
+  });
 });

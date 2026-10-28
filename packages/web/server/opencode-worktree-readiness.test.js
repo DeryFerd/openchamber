@@ -118,14 +118,17 @@ describe('issue #3464 worktree OpenCode initialization', () => {
     expect(fixture.forwarded).toEqual([]);
   });
 
-  it('fails closed on bootstrap failure or timeout without initializing OpenCode', async () => {
+  it('times out while pending, then forwards once the checkout has failed', async () => {
     const fixture = await createFixture({ timeoutMs: 0 });
     const timedOut = await fetch(`${fixture.url}/api/config?directory=${encodeURIComponent(worktree)}`);
     expect(timedOut.status).toBe(503);
     fixture.setBootstrap({ status: 'failed', phase: 'directory-created', error: 'checkout failed' });
-    const failed = await fetch(`${fixture.url}/api/session?directory=${encodeURIComponent(worktree)}`, { method: 'POST' });
-    expect(failed.status).toBe(503);
-    expect(await failed.json()).toEqual({ error: 'checkout failed' });
-    expect(fixture.forwarded).toEqual([]);
+    const failed = await fetch(`${fixture.url}/api/session?directory=${encodeURIComponent(worktree)}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Session after failed checkout' }),
+    });
+    expect(failed.status).toBe(200);
+    expect(await failed.json()).toEqual({ projectID: 'global', directory: worktree, title: 'Session after failed checkout' });
+    expect(fixture.forwarded).toEqual(['/api/session']);
   });
 });

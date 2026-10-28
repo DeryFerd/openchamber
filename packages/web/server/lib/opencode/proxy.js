@@ -1104,7 +1104,11 @@ export const registerOpenCodeProxy = (app, deps) => {
         const status = await readWorktreeBootstrapStatus(directory);
         if (res.destroyed || res.writableEnded || req.aborted) return;
         if (status.status === 'failed') {
-          return res.status(503).json({ error: status.error || 'Worktree bootstrap failed' });
+          // Population stopped: waiting can never release this request, and the
+          // retained record keeps marking the checkout as incomplete for every
+          // surface that reads it (#5811). Let reads through so recovery
+          // controls and session lists stay usable.
+          return next();
         }
         if (status.status === 'ready' || status.phase === 'git-ready' || status.phase === 'setup-ready') {
           return next();

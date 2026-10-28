@@ -1040,13 +1040,22 @@ Discovery already reads each skill's frontmatter and body. Source lookup uses th
   - Folder trust gate (`../opencode-trust`): a request for a folder whose OpenCode configuration runs code answers 403 `opencode_trust_required` until the user trusts it, and `GET`/`POST /api/opencode/trust` serve the prompt. Registered ahead of the readiness hold, since the answer needs no running OpenCode.
 
 Git bootstrap must reach `git-ready` before OpenCode can cache a new worktree's
-project identity or config. Setup scripts may still be running; the optional UI
-setup wait remains separate. Failed or timed-out checkout returns 503 without
-forwarding. The shared draft creator keeps the project directory selected until
-creation returns, because preview paths have no bootstrap state. A directory with
-no bootstrap state was never populated by this server and passes at once. The gate
-reads the in-memory state only: the durable bootstrap store takes a cross-process
-file lock per read, which must not sit on every proxied request.
+project identity or config while population is still running. Setup scripts may
+still be running; the optional UI setup wait remains separate. A timed-out
+checkout returns 503 without forwarding. A failed checkout forwards instead:
+the population stopped, so waiting can never release the request, and the
+retained record keeps marking the checkout as incomplete for every surface that
+reads it (#5811). Holding a failed directory closed was weighed and rejected,
+because it locks the recovery controls (Remote select, Download again) out of
+the state they exist to repair. The risk stays named here: OpenCode may cache
+a half-populated folder's project identity before Download again succeeds, and
+a session created after the repair inherits that identity until the instance
+restarts; the service has no disposal hook on the recovery path today. The
+shared draft creator keeps the project directory selected until creation
+returns, because preview paths have no bootstrap state. A directory with no
+bootstrap state was never populated by this server and passes at once. The gate
+reads the in-memory state only: the durable bootstrap store takes a
+cross-process file lock per read, which must not sit on every proxied request.
 
 This server gate covers web, Electron, hosted mobile, and Capacitor connections.
 The VS Code extension owns its separate Git and proxy implementation.

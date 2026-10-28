@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { SourceControlAPI, SourceControlBindingRead, SourceControlReadContext } from '@/lib/api/types';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
+import { getWorktreeBootstrapState, waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
 import { defaultSourceControlIdentities, getBoundSourceControlReadContexts } from './identity';
 import { useSourceControlProviderRegistry } from './providers/registry';
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
@@ -178,7 +178,16 @@ export class RepositoryBindingOwner {
       if (!this.current(scope)) return null;
       // A worktree still being checked out is not a repository yet; reading it
       // then fails, and the failure would stay until a manual retry.
-      await this.waitForRepository(scope.directory);
+      try {
+        await this.waitForRepository(scope.directory);
+      } catch (error) {
+        // A failed bootstrap will never reach git-ready, and waiting on it
+        // would lock the recovery controls (select remote, download again)
+        // out of the very state they exist to repair (#5811). Release the
+        // wait only for that terminal state; other wait failures still fail
+        // the read.
+        if (getWorktreeBootstrapState(scope.directory)?.status !== 'failed') throw error;
+      }
       if (!this.current(scope)) return null;
       return api.repositoryBinding(scope.directory);
     }).then((read) => {
