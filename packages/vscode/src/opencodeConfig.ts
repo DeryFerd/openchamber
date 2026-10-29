@@ -2677,7 +2677,7 @@ type NormalizedCustomProviderConfig = {
   name: string;
   settings: Record<string, unknown> & { baseURL: string };
   headers?: Record<string, string>;
-  models: Record<string, { modelID: string; name: string }>;
+  models: Record<string, { modelID: string; name: string; type?: 'chat' | 'image' }>;
   env?: string[];
 };
 
@@ -2731,7 +2731,7 @@ export const validateCustomProviderConfig = (
     return { ok: false as const, error: 'At least one model is required' };
   }
 
-  const normalizedModels: Record<string, { modelID: string; name: string }> = {};
+  const normalizedModels: Record<string, { modelID: string; name: string; type?: 'chat' | 'image' }> = {};
   for (const [modelId, modelValue] of Object.entries(models)) {
     const trimmedId = typeof modelId === 'string' ? modelId.trim() : '';
     if (!trimmedId) {
@@ -2745,6 +2745,16 @@ export const validateCustomProviderConfig = (
       return { ok: false as const, error: `Model "${trimmedId}" requires a name` };
     }
     normalizedModels[trimmedId] = { modelID: trimmedId, name: modelName };
+    // Mirror the web server's custom-model validation: the type picks the
+    // bucket OpenCode lists the model in, so dropping it here would make a
+    // VS Code save erase a hand-written `type: "image"` (#5865).
+    const modelType = modelValue.type === undefined || modelValue.type === null
+      ? ''
+      : String(modelValue.type).trim();
+    if (modelType && modelType !== 'chat' && modelType !== 'image') {
+      return { ok: false as const, error: `Model "${trimmedId}" type must be "chat" or "image"` };
+    }
+    if (modelType === 'chat' || modelType === 'image') normalizedModels[trimmedId].type = modelType;
   }
 
   const normalized: NormalizedCustomProviderConfig = {

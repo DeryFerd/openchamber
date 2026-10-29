@@ -628,6 +628,7 @@ function toProviderModelEntity(raw) {
   return pickDefined([
     ['modelID', trimmedString(source.modelID ?? source.id)],
     ['name', trimmedString(source.name)],
+    ['type', trimmedString(source.type)],
     ['family', trimmedString(source.family)],
     ['compatibility', toModelCompatibility(source)],
     ['package', toProviderPackage(source.package ?? source.provider?.npm)],

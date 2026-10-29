@@ -159,6 +159,29 @@ describe('custom provider config persistence', () => {
     expect(readJson(result.path).providers['campus-llm'].models.m).toEqual({ modelID: 'm', name: 'M' });
   });
 
+  test('upsertProviderConfig writes, keeps and rejects model types (#5865)', () => {
+    const base = {
+      name: 'Campus LLM',
+      npm: '@ai-sdk/openai-compatible',
+      options: { baseURL: 'https://llm.example.edu/v1' },
+      env: ['CAMPUS_KEY'],
+    };
+    const result = upsertProviderConfig('campus-llm', {
+      ...base,
+      models: { chat: { name: 'Chat' }, pic: { name: 'Pic', type: 'image' } },
+    }, projectDir, 'project');
+    expect(readJson(result.path).providers['campus-llm'].models.pic.type).toBe('image');
+
+    // A later save that omits the type keeps the stored one.
+    upsertProviderConfig('campus-llm', { ...base, models: { chat: { name: 'Chat' }, pic: { name: 'Pic' } } }, projectDir, 'project');
+    expect(readJson(result.path).providers['campus-llm'].models.pic.type).toBe('image');
+
+    expect(validateCustomProviderConfig('campus-llm', {
+      ...base,
+      models: { m: { name: 'M', type: 'bogus' } },
+    }, { hasStoredAuth: true }).error).toContain('type');
+  });
+
   test('upsertProviderConfig updates existing entry and clears disabled_providers', () => {
     const configPath = path.join(projectDir, '.opencode', 'opencode.json');
     writeJson(configPath, {

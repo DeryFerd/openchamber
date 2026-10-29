@@ -155,6 +155,31 @@ describe('custom provider config persistence (VS Code parity)', () => {
     }
   });
 
+  test('upsertProviderConfig writes, keeps and rejects model types (#5865)', () => {
+    const base = {
+      name: 'Campus LLM',
+      npm: '@ai-sdk/openai-compatible',
+      options: { baseURL: 'https://llm.example.edu/v1' },
+      env: ['CAMPUS_KEY'],
+    };
+    const result = upsertProviderConfig('campus-llm', {
+      ...base,
+      models: { chat: { name: 'Chat' }, pic: { name: 'Pic', type: 'image' } },
+    }, projectDir, 'project');
+    assert.equal(readJson(result.path).providers['campus-llm'].models.pic.type, 'image');
+
+    // A later save that omits the type keeps the stored one.
+    upsertProviderConfig('campus-llm', { ...base, models: { chat: { name: 'Chat' }, pic: { name: 'Pic' } } }, projectDir, 'project');
+    assert.equal(readJson(result.path).providers['campus-llm'].models.pic.type, 'image');
+
+    const bogus = validateCustomProviderConfig('campus-llm', {
+      ...base,
+      models: { m: { name: 'M', type: 'bogus' } },
+    }, { hasStoredAuth: true });
+    assert.equal(bogus.ok, false);
+    assert.match(bogus.error ?? '', /type/);
+  });
+
   test('upsertProviderConfig updates existing entry and clears disabled_providers', () => {
     const configPath = path.join(projectDir, 'opencode.json');
     writeJson(configPath, {

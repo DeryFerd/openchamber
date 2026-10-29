@@ -121,7 +121,17 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
     if (!modelName) {
       return { ok: false, error: `Model "${trimmedId}" requires a name` };
     }
+    // OpenCode picks its model list buckets by `type` (chat by default; the
+    // image tool asks for `type: "image"`), so the declared type has to reach
+    // the config or the model is invisible to that bucket (#5865).
+    const modelType = modelValue.type === undefined || modelValue.type === null
+      ? ''
+      : String(modelValue.type).trim();
+    if (modelType && modelType !== 'chat' && modelType !== 'image') {
+      return { ok: false, error: `Model "${trimmedId}" type must be "chat" or "image"` };
+    }
     normalizedModels[trimmedId] = { modelID: trimmedId, name: modelName };
+    if (modelType) normalizedModels[trimmedId].type = modelType;
     if (isPlainObject(modelValue.limit)) {
       const context = modelValue.limit.context;
       const output = modelValue.limit.output;
