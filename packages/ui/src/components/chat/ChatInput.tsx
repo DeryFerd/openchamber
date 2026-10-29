@@ -147,7 +147,8 @@ import { usePermissionStore } from '@/stores/permissionStore';
 import { cyclePermissionMode } from './permissionAutoAccept';
 import { displayedPermissionMode, nextPermissionMode } from '@/stores/utils/permissionAutoAccept';
 import { selectAutoReady, selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
-import { useKeybind } from '@/hooks/useKeybind';
+import { useKeybind, useKeybinds } from '@/hooks/useKeybind';
+import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { hasOpenDropdown } from '@/hooks/keyboard-shortcut-dom';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { useI18n } from '@/lib/i18n';
@@ -620,6 +621,31 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         (s) => btwComposerSessionId ? s.sessionAgentSelections.get(btwComposerSessionId) ?? null : null,
         [btwComposerSessionId],
     ));
+    // The favorite-model keybinds belong to the /btw composer while it is
+    // active: the app-wide default deliberately declines (it would move the
+    // parent session's model), so these override it and cycle the /btw
+    // session's own selection (#5914).
+    const cycleBtwFavoriteModel = React.useCallback((delta: number): boolean => {
+        if (!btwComposerSessionId) return false;
+        const ui = useUIStore.getState();
+        const config = useConfigStore.getState();
+        const saved = useSelectionStore.getState().getSessionModelSelection(btwComposerSessionId);
+        // The session selection stores providerId/modelId; the favorite cycler
+        // speaks ModelRef (providerID/modelID).
+        const current = saved
+            ? { providerID: saved.providerId, modelID: saved.modelId }
+            : config.currentProviderId && config.currentModelId
+                ? { providerID: config.currentProviderId, modelID: config.currentModelId }
+                : null;
+        const next = getNextFavoriteModel(ui.favoriteModels, config.providers, ui.hiddenModels, current, delta);
+        if (!next) return false;
+        useSelectionStore.getState().saveSessionModelSelection(btwComposerSessionId, next.providerID, next.modelID);
+        return true;
+    }, [btwComposerSessionId]);
+    useKeybinds(isBtwActive && btwComposerSessionId ? {
+        cycle_favorite_model_forward: () => cycleBtwFavoriteModel(1),
+        cycle_favorite_model_backward: () => cycleBtwFavoriteModel(-1),
+    } : {});
     const consumePendingBtwComposerRequest = useInputStore((s) => s.consumePendingBtwComposerRequest);
     const pendingBtwComposerRequest = useInputStore((s) => s.pendingBtwComposerRequest);
     const pendingPresetSubmit = useInputStore((s) => s.pendingPresetSubmit);
