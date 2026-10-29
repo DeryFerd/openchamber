@@ -517,6 +517,19 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().providers[0]?.models[0]?.modelID).toBe('new-model');
   });
 
+  test('a provider with no chat models stays listed so it stays editable (#5867)', async () => {
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('chat-provider'), providerInfo('image-only')],
+      models: [model('chat-provider', 'chat-model')],
+      default: { providerID: 'chat-provider', id: 'chat-model' },
+    });
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    const provider = useConfigStore.getState().providers.find((entry) => entry.id === 'image-only');
+    expect(provider).toBeDefined();
+    expect(provider?.activation).toBe('enabled');
+    expect(provider?.models).toEqual([]);
+  });
+
   test('worktree catalog keeps its parent project agent default', async () => {
     const worktree = '/workspace/project-default-worktree';
     useSessionUIStore.setState({

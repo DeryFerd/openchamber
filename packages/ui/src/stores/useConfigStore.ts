@@ -2237,11 +2237,14 @@ export const useConfigStore = create<ConfigStore>()(
                                 if (bucket) bucket.push(model);
                                 else modelsByProvider.set(model.providerID, [model]);
                             }
-                            // A provider the user switched off, or one with no usable
-                            // model, is not offerable — v2 replaced the `connected` list
-                            // with these two facts.
+                            // A provider the user switched off is not offerable — v2
+                            // replaced the `connected` list with that fact. One with no
+                            // chat models in the catalog still belongs here: an
+                            // image-only provider would otherwise vanish from Settings
+                            // and become uneditable, so its models array is simply
+                            // empty (#5867).
                             const processedProviders: ProviderWithModelList[] = providers
-                                .filter((provider) => provider.activation !== "disabled" && modelsByProvider.has(provider.id))
+                                .filter((provider) => provider.activation !== "disabled")
                                 .map((provider) => ({
                                     ...provider,
                                     models: modelsByProvider.get(provider.id) ?? [],
