@@ -25,6 +25,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGitStore } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { resolveProjectForSessionDirectory, normalizeProjectPath } from '@/lib/projectResolution';
 import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
@@ -325,6 +326,14 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
   // hold a dock count the user has no way to clear. Pending approvals stay
   // listed below regardless.
   const pinnedIds = useSessionPinnedStore.getState().ids;
+  // The Pinned and In work zones are optional: with a block hidden (or works
+  // kept in place), an unplaced session in an unconfigured directory has no
+  // row anywhere, so it must not be counted (#5861).
+  const displaySettings = useSessionDisplayStore.getState();
+  const pinnedVisible = displaySettings.showPinnedSection;
+  const workVisible = useUIStore.getState().sessionWorkEnabled
+    && displaySettings.showWorkSection
+    && !displaySettings.keepWorkInPlace;
   const isPlacedBySidebar = (session: Session): boolean => {
     const directory = resolveGlobalSessionDirectory(session);
     // A managed chat keeps its identity when its directory no longer sits under
@@ -336,6 +345,8 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
   const hasSidebarRow = (session: Session): boolean => sessionHasSidebarRow(session, {
     isPlaced: isPlacedBySidebar(session),
     isPinned: isSessionPinned(pinnedIds, session.directory, session.id),
+    pinnedVisible,
+    workVisible,
   });
 
   // Count the full root list, independently of the tray's visibility and limit.
@@ -449,7 +460,10 @@ export const useTraySync = (): void => {
 
     const unsubscribeGlobal = useGlobalSessionsStore.subscribe(() => scheduleFlush());
     const unsubscribeUI = useUIStore.subscribe((state, previous) => {
-      if (state.dockBadgeEnabled !== previous.dockBadgeEnabled) {
+      // Both inputs feed the badge's row predicate: the badge toggle gates the
+      // count itself, and the work feature gates the In work zone (#5861).
+      if (state.dockBadgeEnabled !== previous.dockBadgeEnabled
+        || state.sessionWorkEnabled !== previous.sessionWorkEnabled) {
         scheduleFlush();
       }
     });
@@ -459,6 +473,9 @@ export const useTraySync = (): void => {
     const unsubscribeProjects = useProjectsStore.subscribe(() => scheduleFlush());
     const unsubscribeWorktrees = useSessionUIStore.subscribe(() => scheduleFlush());
     const unsubscribePins = useSessionPinnedStore.subscribe(() => scheduleFlush());
+    // Zone visibility decides whether a pinned or in-work session has a row at
+    // all, so hiding or showing a block moves the badge too (#5861).
+    const unsubscribeDisplay = useSessionDisplayStore.subscribe(() => scheduleFlush());
     const stopBadgeSync = () => {
       disposed = true;
       if (flushTimer !== null) window.clearTimeout(flushTimer);
@@ -467,6 +484,7 @@ export const useTraySync = (): void => {
       unsubscribeProjects();
       unsubscribeWorktrees();
       unsubscribePins();
+      unsubscribeDisplay();
     };
 
     if (!trayEnabled) {

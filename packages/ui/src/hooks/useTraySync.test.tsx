@@ -8,6 +8,7 @@ import { useTraySync } from './useTraySync';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -96,6 +97,47 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     useProjectsStore.setState({ projects: [] });
     await flush();
     expect(counts).toEqual([1, 0]);
+  });
+
+  test('does not count pinned or in-work sessions whose zones are hidden (#5861)', async () => {
+    useSessionDisplayStore.setState({ showPinnedSection: false, showWorkSection: false });
+    useUIStore.setState({ sessionWorkEnabled: true, dockBadgeEnabled: true });
+    useGlobalSessionsStore.setState({
+      activeSessions: [
+        { ...session('pinned', undefined, '/tmp/eval-run'), metadata: { openchamber: { pinned: { at: 1 } } } },
+        { ...session('work', undefined, '/tmp/eval-run'), metadata: { openchamber: { work: { state: 'open' } } } },
+      ],
+    });
+    finishTurn('pinned');
+    finishTurn('work');
+    await act(async () => root.render(<Harness />));
+    expect(counts).toEqual([0]);
+
+    useSessionDisplayStore.setState({ showPinnedSection: true, showWorkSection: true });
+    await flush();
+    expect(counts).toEqual([0, 2]);
+  });
+
+  test('moves the badge when the work feature toggles while the In work zone is shown (#5861)', async () => {
+    useSessionDisplayStore.setState({ showPinnedSection: true, showWorkSection: true });
+    useUIStore.setState({ sessionWorkEnabled: true, dockBadgeEnabled: true });
+    useGlobalSessionsStore.setState({
+      activeSessions: [
+        { ...session('work', undefined, '/tmp/eval-run'), metadata: { openchamber: { work: { state: 'open' } } } },
+      ],
+    });
+    finishTurn('work');
+    await act(async () => root.render(<Harness />));
+    expect(counts).toEqual([1]);
+
+    // Turning the work feature off hides the In work zone; the badge follows.
+    useUIStore.setState({ sessionWorkEnabled: false });
+    await flush();
+    expect(counts).toEqual([1, 0]);
+
+    useUIStore.setState({ sessionWorkEnabled: true });
+    await flush();
+    expect(counts).toEqual([1, 0, 1]);
   });
 
   test('publishes unread chats, clears viewed chats, and respects the badge toggle without tray timers or listeners', async () => {
