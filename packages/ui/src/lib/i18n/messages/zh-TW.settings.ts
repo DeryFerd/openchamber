@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': '保留期限從封存時開始計算。過期的工作階段會被刪除。',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '保留期限從工作階段的最後活動時間開始計算。過期的工作階段會被封存。',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': '保留期限從工作階段的最後活動時間開始計算。過期的工作階段會被刪除。',
   'settings.sourceControl.ssh.title': 'SSH 金鑰',
   'settings.sourceControl.ssh.load': '顯示金鑰',
   'settings.sourceControl.ssh.discover': '在 ~/.ssh 中尋找金鑰',
@@ -1098,8 +1101,6 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': '進行中的工作階段',
   'settings.openchamber.sessionWork.info': '側邊欄中位於聊天下方的區塊，用來顯示正在處理的工作階段。傳送訊息後，工作階段就會顯示在這裡。預設只會顯示在此區塊。若要同時顯示在所屬專案下，請在側邊欄選單中開啟「在專案下也顯示進行中的工作」。VS Code 一律會在專案下顯示工作階段。點選勾號或使用工作階段選單即可將其標記為完成。當某一輪看起來像工作的結尾時，勾號會變灰作為提示。',
   'settings.openchamber.sessionWork.field.enabled': '顯示進行中的工作階段',
-  'settings.openchamber.sessionRetention.field.onlyArchived': '僅已封存的工作階段',
-  'settings.openchamber.sessionRetention.field.onlyArchivedDescription': '使用刪除操作，並從封存時開始計算保留期限。未封存的工作階段會保留。',
   'settings.openchamber.sessionRetention.archivedTooltip': '刪除超過保留期限的已封存工作階段。保留最近封存的 5 個工作階段、目前開啟的工作階段、執行中的工作階段及已分享的工作階段。如果刪除父工作階段會同時刪除受保護的子工作階段，則保留父工作階段。',
   'settings.openchamber.sessionRetention.tooltip': '根據最後活動時間封存或刪除未封存的工作階段。保留最近 5 個工作階段、目前開啟的工作階段、執行中的工作階段及已分享的工作階段。已封存的工作階段會保留。如果刪除父工作階段會同時刪除受保護的子工作階段，則保留父工作階段。',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': '啟用自動清理',

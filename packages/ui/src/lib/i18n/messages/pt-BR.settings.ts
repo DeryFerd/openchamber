@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': 'Conta o período de retenção a partir do arquivamento. As sessões expiradas são excluídas.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Conta o período de retenção a partir da última atividade da sessão. As sessões expiradas são arquivadas.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Conta o período de retenção a partir da última atividade da sessão. As sessões expiradas são excluídas.',
   'settings.sourceControl.ssh.title': 'Chaves SSH',
   'settings.sourceControl.ssh.load': 'Mostrar chaves',
   'settings.sourceControl.ssh.discover': 'Procurar chaves em ~/.ssh',
@@ -1101,8 +1104,6 @@ export const settingsDict = {
   "settings.openchamber.sessionWork.title": "Sessões em andamento",
   "settings.openchamber.sessionWork.info": "Um bloco na barra lateral, abaixo das conversas, para as sessões em que você está trabalhando. A sessão aparece ali assim que você envia uma mensagem. Por padrão, ela aparece somente nesse bloco. Ative 'Mostrar também o que está em andamento nos projetos' no menu da barra lateral para mantê-la também no projeto. No VS Code, as sessões sempre aparecem nos projetos. Marque uma sessão como concluída pelo check ou pelo menu. Quando um turno parece o fim do trabalho, o check fica cinza como dica.",
   "settings.openchamber.sessionWork.field.enabled": "Mostrar sessões em andamento",
-  "settings.openchamber.sessionRetention.field.onlyArchived": "Somente sessões arquivadas",
-  "settings.openchamber.sessionRetention.field.onlyArchivedDescription": "Usa Excluir e conta o período de retenção a partir do arquivamento. As sessões não arquivadas são mantidas.",
   "settings.openchamber.sessionRetention.archivedTooltip": "Exclui sessões arquivadas cujo período de retenção terminou. Mantém as 5 sessões arquivadas mais recentemente, a sessão aberta, as sessões em execução e as compartilhadas. Uma sessão principal é mantida se sua exclusão também excluir uma sessão filha protegida.",
   "settings.openchamber.sessionRetention.tooltip": "Arquiva ou exclui sessões não arquivadas com base na última atividade. Mantém as 5 sessões mais recentes, a sessão aberta, as sessões em execução e as compartilhadas. As sessões arquivadas são mantidas. Uma sessão principal é mantida se sua exclusão também excluir uma sessão filha protegida.",
   "settings.openchamber.sessionRetention.field.enableAutoCleanupAria": "Ativar limpeza automática",

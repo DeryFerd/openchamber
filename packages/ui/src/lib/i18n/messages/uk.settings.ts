@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': 'Період зберігання рахується від архівації. Сесії, строк яких минув, видаляються.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Період зберігання рахується від останньої активності сесії. Сесії, строк яких минув, архівуються.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Період зберігання рахується від останньої активності сесії. Сесії, строк яких минув, видаляються.',
   'settings.sourceControl.ssh.title': 'SSH-ключі',
   'settings.sourceControl.ssh.load': 'Показати ключі',
   'settings.sourceControl.ssh.discover': 'Знайти ключі в ~/.ssh',
@@ -1101,8 +1104,6 @@ export const settingsDict = {
   "settings.openchamber.sessionWork.title": "Сесії в роботі",
   "settings.openchamber.sessionWork.info": "Блок у сайдбарі під «Чатами» для сесій, у яких ви працюєте. Сесія з’являється там, щойно ви надсилаєте повідомлення. За замовчуванням вона відображається лише в цьому блоці. Увімкніть «Також показувати роботу в проєктах» у меню сайдбара, щоб вона відображалася і у своєму проєкті. У VS Code сесії завжди показуються у своїх проєктах. Позначте сесію як готову галочкою або в її меню. Коли хід схожий на завершення роботи, галочка сіріє як підказка.",
   "settings.openchamber.sessionWork.field.enabled": "Показувати сесії в роботі",
-  "settings.openchamber.sessionRetention.field.onlyArchived": "Лише архівні сесії",
-  "settings.openchamber.sessionRetention.field.onlyArchivedDescription": "Використовує видалення та рахує період зберігання від архівації. Неархівовані сесії зберігаються.",
   "settings.openchamber.sessionRetention.archivedTooltip": "Видаляє архівні сесії після завершення періоду зберігання. Зберігає 5 останніх архівованих сесій, відкриту сесію, сесії в роботі та сесії з публічним посиланням. Батьківська сесія залишається, якщо її видалення зачепить захищену дочірню.",
   "settings.openchamber.sessionRetention.tooltip": "Архівує або видаляє неархівовані сесії за часом останньої активності. Зберігає 5 найновіших сесій, відкриту сесію, сесії в роботі та сесії з публічним посиланням. Архівні сесії зберігаються. Батьківська сесія залишається, якщо її видалення зачепить захищену дочірню.",
   "settings.openchamber.sessionRetention.field.enableAutoCleanupAria": "Увімкнути автоматичне очищення",

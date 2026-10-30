@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': 'La durée de conservation commence à l\'archivage. Les sessions expirées sont supprimées.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'La durée de conservation commence à la dernière activité de la session. Les sessions expirées sont archivées.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'La durée de conservation commence à la dernière activité de la session. Les sessions expirées sont supprimées.',
   'settings.sourceControl.ssh.title': 'Clés SSH',
   'settings.sourceControl.ssh.load': 'Afficher les clés',
   'settings.sourceControl.ssh.discover': 'Chercher des clés dans ~/.ssh',
@@ -1004,8 +1007,6 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'Sessions en cours',
   'settings.openchamber.sessionWork.info': 'Un bloc dans la barre latérale, sous les discussions, pour les sessions sur lesquelles vous travaillez. Une session y apparaît dès que vous lui envoyez un message. Par défaut, elle apparaît uniquement dans ce bloc. Activez « Afficher aussi le travail en cours sous les projets » dans le menu de la barre latérale pour la garder aussi dans son projet. Dans VS Code, les sessions restent toujours dans leur projet. Marquez une session comme terminée avec la coche ou son menu. Quand un tour ressemble à la fin du travail, la coche devient grise en guise d’indice.',
   'settings.openchamber.sessionWork.field.enabled': 'Afficher les sessions en cours',
-  'settings.openchamber.sessionRetention.field.onlyArchived': 'Uniquement les sessions archivées',
-  'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Utilise Supprimer et compte la période de conservation depuis l\'archivage. Les sessions non archivées sont conservées.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'Supprime les sessions archivées dont la période de conservation a expiré. Conserve les 5 sessions archivées le plus récemment, la session ouverte, les sessions en cours et les sessions partagées. Une session parente est conservée si sa suppression supprimerait aussi une session enfant protégée.',
   'settings.openchamber.sessionRetention.tooltip': 'Archive ou supprime les sessions non archivées selon leur dernière activité. Conserve les 5 sessions les plus récentes, la session ouverte, les sessions en cours et les sessions partagées. Les sessions archivées sont conservées. Une session parente est conservée si sa suppression supprimerait aussi une session enfant protégée.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Activer le nettoyage automatique',

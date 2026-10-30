@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': 'Telt de bewaartermijn vanaf het archiveren. Verlopen sessies worden verwijderd.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Telt de bewaartermijn vanaf de laatste activiteit van de sessie. Verlopen sessies worden gearchiveerd.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Telt de bewaartermijn vanaf de laatste activiteit van de sessie. Verlopen sessies worden verwijderd.',
   'settings.sourceControl.ssh.title': 'SSH-sleutels',
   'settings.sourceControl.ssh.load': 'Sleutels tonen',
   'settings.sourceControl.ssh.discover': 'Sleutels zoeken in ~/.ssh',
@@ -1134,8 +1137,6 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'Sessies in uitvoering',
   'settings.openchamber.sessionWork.info': 'Een blok in de zijbalk, onder Chats, voor de sessies waaraan u werkt. Een sessie verschijnt daar zodra u een bericht stuurt. Standaard staat ze alleen in dit blok. Schakel "Werk in uitvoering ook onder projecten tonen" in via het zijbalkmenu om haar ook in haar project te tonen. In VS Code verschijnen sessies altijd in hun projecten. Markeer een sessie als afgerond met het vinkje of via het sessiemenu. Als een beurt op het einde van het werk lijkt, wordt het vinkje grijs als hint.',
   'settings.openchamber.sessionWork.field.enabled': 'Sessies in uitvoering tonen',
-  'settings.openchamber.sessionRetention.field.onlyArchived': 'Alleen gearchiveerde sessies',
-  'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Gebruikt Verwijderen en telt de bewaartermijn vanaf het archiveren. Niet-gearchiveerde sessies blijven behouden.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'Verwijdert verlopen gearchiveerde sessies. Behoudt de 5 meest recent gearchiveerde sessies, de geopende sessie, lopende sessies en gedeelde sessies. Een bovenliggende sessie blijft behouden als verwijderen daarvan ook een beschermde subsessie zou verwijderen.',
   'settings.openchamber.sessionRetention.tooltip': 'Archiveert of verwijdert niet-gearchiveerde sessies op basis van de laatste activiteit. Behoudt de 5 meest recente sessies, de geopende sessie, lopende sessies en gedeelde sessies. Gearchiveerde sessies blijven behouden. Een bovenliggende sessie blijft behouden als verwijderen daarvan ook een beschermde subsessie zou verwijderen.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Automatisch opschonen aanzetten',

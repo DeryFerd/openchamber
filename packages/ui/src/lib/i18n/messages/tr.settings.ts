@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': 'Saklama süresi arşivleme anından itibaren sayılır. Süresi dolan oturumlar silinir.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Saklama süresi oturumun son etkinliğinden itibaren sayılır. Süresi dolan oturumlar arşivlenir.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Saklama süresi oturumun son etkinliğinden itibaren sayılır. Süresi dolan oturumlar silinir.',
   'settings.themeImport.selectAll': 'Tümünü seç',
   'settings.themeImport.deselectAll': 'Tümünün seçimini kaldır',
   'settings.themeImport.complete': 'İçe aktarma tamamlandı',
@@ -1109,8 +1112,6 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'Devam eden oturumlar',
   'settings.openchamber.sessionWork.info': 'Üzerinde çalıştığınız oturumlar için kenar çubuğunda sohbetlerin altındaki bölüm. Bir oturum, mesaj gönderdiğinizde burada görünür. Varsayılan olarak yalnızca bu bölümde görünür. Projesinde de görünmesi için kenar çubuğu menüsünden "Devam eden işleri projelerin altında da göster" seçeneğini açın. VS Code oturumları her zaman projelerinde gösterir. Onay işaretiyle veya oturum menüsünden tamamlandı olarak işaretleyin. Bir tur işin sonu gibi göründüğünde onay işareti ipucu olarak griye döner.',
   'settings.openchamber.sessionWork.field.enabled': 'Devam eden oturumları göster',
-  'settings.openchamber.sessionRetention.field.onlyArchived': 'Yalnızca arşivlenmiş oturumlar',
-  'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Sil seçeneğini kullanır ve saklama süresini arşivleme tarihinden itibaren sayar. Arşivlenmemiş oturumlar korunur.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'Saklama süresi dolan arşivlenmiş oturumları siler. En son arşivlenen 5 oturumu, açık oturumu, çalışan ve paylaşılan oturumları korur. Bir üst oturumun silinmesi korunan bir alt oturumu da silecekse üst oturum korunur.',
   'settings.openchamber.sessionRetention.tooltip': 'Arşivlenmemiş oturumları son etkinliğe göre arşivler veya siler. En yeni 5 oturumu, açık oturumu, çalışan ve paylaşılan oturumları korur. Arşivlenmiş oturumlar korunur. Bir üst oturumun silinmesi korunan bir alt oturumu da silecekse üst oturum korunur.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Otomatik temizlemeyi etkinleştir',

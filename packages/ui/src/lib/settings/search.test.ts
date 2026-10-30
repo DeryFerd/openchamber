@@ -24,6 +24,14 @@ const runtimeCtx = {
 };
 
 describe('settings search', () => {
+  test('indexes the retention target under its current label and existing anchor', () => {
+    const results = buildSettingsSearchResults({ query: 'retention', runtimeCtx, t, getPageTitle: (page) => page });
+    const target = results.find((result) => result.id === 'sessions.retention-only-archived');
+    expect(target?.page).toBe('sessions');
+    expect(target?.title).toBe('settings.layout.sessions.retention.target');
+    expect(target?.description).toBeNull();
+  });
+
   test('finds double-paste on every shared Settings surface', () => {
     for (const query of ['double paste', 'ctrl v', 'cmd v']) {
       for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {

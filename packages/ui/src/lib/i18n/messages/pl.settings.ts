@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': 'Okres przechowywania liczy się od archiwizacji. Sesje po upływie tego okresu są usuwane.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Okres przechowywania liczy się od ostatniej aktywności sesji. Sesje po upływie tego okresu są archiwizowane.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Okres przechowywania liczy się od ostatniej aktywności sesji. Sesje po upływie tego okresu są usuwane.',
   'settings.sourceControl.ssh.title': 'Klucze SSH',
   'settings.sourceControl.ssh.load': 'Pokaż klucze',
   'settings.sourceControl.ssh.discover': 'Znajdź klucze w ~/.ssh',
@@ -1073,8 +1076,6 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'Sesje w toku',
   'settings.openchamber.sessionWork.info': 'Blok na pasku bocznym pod czatami, przeznaczony dla sesji, nad którymi pracujesz. Sesja pojawia się tam po wysłaniu wiadomości. Domyślnie jest widoczna tylko w tym bloku. Włącz „Pokazuj też prace w toku pod projektami” w menu paska bocznego, aby była widoczna również w swoim projekcie. W VS Code sesje są zawsze widoczne w projektach. Oznacz sesję jako gotową znacznikiem lub w jej menu. Gdy tura wygląda na koniec pracy, znacznik szarzeje jako podpowiedź.',
   'settings.openchamber.sessionWork.field.enabled': 'Pokazuj sesje w toku',
-  'settings.openchamber.sessionRetention.field.onlyArchived': 'Tylko zarchiwizowane sesje',
-  'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Używa opcji Usuń i liczy okres przechowywania od archiwizacji. Niezarchiwizowane sesje pozostają zachowane.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'Usuwa zarchiwizowane sesje po upływie okresu przechowywania. Zachowuje 5 ostatnio zarchiwizowanych sesji, otwartą sesję oraz sesje działające i udostępnione. Sesja nadrzędna pozostaje, jeśli jej usunięcie usunęłoby też chronioną sesję podrzędną.',
   'settings.openchamber.sessionRetention.toast.archivedCount': 'Zarchiwizowano {count} sesji',
   'settings.openchamber.sessionRetention.toast.deletedCount': 'Usunięto {count} sesji',

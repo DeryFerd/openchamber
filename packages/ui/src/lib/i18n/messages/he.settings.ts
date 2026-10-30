@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': 'תקופת השמירה נספרת מרגע ההעברה לארכיון. הפעלות שפג תוקפן נמחקות.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'תקופת השמירה נספרת מהפעילות האחרונה בהפעלה. הפעלות שפג תוקפן מועברות לארכיון.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'תקופת השמירה נספרת מהפעילות האחרונה בהפעלה. הפעלות שפג תוקפן נמחקות.',
   'settings.sourceControl.ssh.title': 'מפתחות SSH',
   'settings.sourceControl.ssh.load': 'הצג מפתחות',
   'settings.sourceControl.ssh.discover': 'חפש מפתחות ב-~/.ssh',
@@ -1133,8 +1136,6 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'הפעלות בעבודה',
   'settings.openchamber.sessionWork.info': 'אזור בסרגל הצד, מתחת לצ\'אטים, להפעלות שבהן עובדים. הפעלה מופיעה כאן כששולחים בה הודעה. כברירת מחדל היא מופיעה באזור הזה בלבד. כדי להציג אותה גם בפרויקט שלה, הפעילו בתפריט סרגל הצד את „להציג עבודה פעילה גם תחת הפרויקטים”. ב-VS Code ההפעלות מופיעות תמיד בפרויקטים שלהן. סמנו הפעלה כהושלמה באמצעות סימן הווי או תפריט ההפעלה. כשנראה שתור מסיים את העבודה, סימן הווי הופך לאפור כרמז.',
   'settings.openchamber.sessionWork.field.enabled': 'הצג הפעלות בעבודה',
-  'settings.openchamber.sessionRetention.field.onlyArchived': 'רק הפעלות בארכיון',
-  'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'משתמש במחיקה וסופר את תקופת השמירה מרגע ההעברה לארכיון. הפעלות שלא בארכיון נשמרות.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'מוחק הפעלות בארכיון שפג תוקפן. שומר את 5 ההפעלות שהועברו לארכיון לאחרונה, את ההפעלה הפתוחה, הפעלות שרצות והפעלות משותפות. הפעלת אב נשמרת אם מחיקתה תמחק גם הפעלת צאצא מוגנת.',
   'settings.openchamber.sessionRetention.tooltip': 'מעביר לארכיון או מוחק הפעלות שלא בארכיון לפי הפעילות האחרונה. שומר את 5 ההפעלות האחרונות, את ההפעלה הפתוחה, הפעלות שרצות והפעלות משותפות. הפעלות בארכיון נשמרות. הפעלת אב נשמרת אם מחיקתה תמחק גם הפעלת צאצא מוגנת.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'הפעל ניקוי אוטומטי',

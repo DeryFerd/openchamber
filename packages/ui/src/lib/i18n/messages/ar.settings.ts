@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': 'تُحسب مدة الاحتفاظ من وقت الأرشفة. تُحذف الجلسات التي انتهت مدتها.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'تُحسب مدة الاحتفاظ من آخر نشاط للجلسة. تُؤرشف الجلسات التي انتهت مدتها.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'تُحسب مدة الاحتفاظ من آخر نشاط للجلسة. تُحذف الجلسات التي انتهت مدتها.',
   'settings.sourceControl.ssh.title': 'مفاتيح SSH',
   'settings.sourceControl.ssh.load': 'إظهار المفاتيح',
   'settings.sourceControl.ssh.discover': 'البحث عن مفاتيح في ~/.ssh',
@@ -1133,8 +1136,6 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'الجلسات قيد العمل',
   'settings.openchamber.sessionWork.info': 'قسم في الشريط الجانبي أسفل المحادثات للجلسات التي تعمل عليها. تظهر الجلسة هنا عند إرسال رسالة فيها. افتراضيًا، تظهر في هذا القسم فقط. فعّل «إظهار العمل الجاري تحت المشاريع أيضًا» من قائمة الشريط الجانبي لعرضها في مشروعها كذلك. في VS Code تظهر الجلسات دائمًا ضمن مشاريعها. علّم الجلسة كمنتهية باستخدام علامة الصح أو قائمة الجلسة. عندما تبدو الجولة نهايةً للعمل، تتحول علامة الصح إلى الرمادي كتلميح.',
   'settings.openchamber.sessionWork.field.enabled': 'إظهار الجلسات قيد العمل',
-  'settings.openchamber.sessionRetention.field.onlyArchived': 'الجلسات المؤرشفة فقط',
-  'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'يستخدم الحذف ويحسب مدة الاحتفاظ من وقت الأرشفة. تُحفظ الجلسات غير المؤرشفة.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'يحذف الجلسات المؤرشفة المنتهية المدة. يحتفظ بآخر 5 جلسات مؤرشفة، والجلسة المفتوحة، والجلسات قيد التشغيل، والجلسات المشتركة. يُحتفظ بالجلسة الأم إذا كان حذفها سيحذف أيضًا جلسة فرعية محمية.',
   'settings.openchamber.sessionRetention.tooltip': 'يؤرشف الجلسات غير المؤرشفة أو يحذفها بناءً على آخر نشاط. يحتفظ بآخر 5 جلسات، والجلسة المفتوحة، والجلسات قيد التشغيل، والجلسات المشتركة. تُحفظ الجلسات المؤرشفة. يُحتفظ بالجلسة الأم إذا كان حذفها سيحذف أيضًا جلسة فرعية محمية.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'تفعيل التنظيف التلقائي',

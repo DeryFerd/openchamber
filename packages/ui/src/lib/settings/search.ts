@@ -679,8 +679,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: 'sessions.retention-only-archived',
     page: 'sessions',
-    titleKey: 'settings.openchamber.sessionRetention.field.onlyArchived',
-    descriptionKey: 'settings.openchamber.sessionRetention.field.onlyArchivedDescription',
+    titleKey: 'settings.layout.sessions.retention.target',
     keywords: ['archive', 'archived', 'only', 'delete', 'cleanup', 'retention'],
   },
   {

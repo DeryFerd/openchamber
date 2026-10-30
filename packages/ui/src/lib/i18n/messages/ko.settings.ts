@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': '보존 기간은 보관 시점부터 계산합니다. 기간이 지난 세션은 삭제됩니다.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '보존 기간은 세션의 마지막 활동부터 계산합니다. 기간이 지난 세션은 보관됩니다.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': '보존 기간은 세션의 마지막 활동부터 계산합니다. 기간이 지난 세션은 삭제됩니다.',
   'settings.sourceControl.ssh.title': 'SSH 키',
   'settings.sourceControl.ssh.load': '키 보기',
   'settings.sourceControl.ssh.discover': '~/.ssh에서 키 찾기',
@@ -1101,8 +1104,6 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': '작업 중인 세션',
   'settings.openchamber.sessionWork.info': '작업 중인 세션을 사이드바의 채팅 아래에 모아 두는 영역입니다. 세션에서 메시지를 보내면 이곳에 표시됩니다. 기본적으로 이 영역에만 표시됩니다. 프로젝트에도 표시하려면 사이드바 메뉴에서 "진행 중인 작업을 프로젝트 아래에도 표시"를 켜세요. VS Code에서는 항상 프로젝트에도 표시됩니다. 체크 표시나 세션 메뉴에서 완료로 표시할 수 있습니다. 턴이 작업의 끝처럼 보이면 힌트로 체크가 회색으로 바뀝니다.',
   'settings.openchamber.sessionWork.field.enabled': '작업 중인 세션 표시',
-  'settings.openchamber.sessionRetention.field.onlyArchived': '보관된 세션만',
-  'settings.openchamber.sessionRetention.field.onlyArchivedDescription': '삭제를 사용하며 보관 시점부터 보존 기간을 계산합니다. 보관되지 않은 세션은 유지됩니다.',
   'settings.openchamber.sessionRetention.archivedTooltip': '보존 기간이 지난 보관된 세션을 삭제합니다. 가장 최근에 보관된 세션 5개, 열려 있는 세션, 실행 중인 세션과 공유된 세션은 유지됩니다. 상위 세션을 삭제하면 보호된 하위 세션도 삭제되는 경우 상위 세션을 유지합니다.',
   'settings.openchamber.sessionRetention.tooltip': '마지막 활동을 기준으로 보관되지 않은 세션을 보관하거나 삭제합니다. 최근 세션 5개, 열려 있는 세션, 실행 중인 세션과 공유된 세션은 유지됩니다. 보관된 세션도 유지됩니다. 상위 세션을 삭제하면 보호된 하위 세션도 삭제되는 경우 상위 세션을 유지합니다.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': '자동 정리 활성화',

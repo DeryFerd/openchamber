@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': 'Counts the retention period from archiving. Expired sessions are deleted.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Counts the retention period from the session\'s last activity. Expired sessions are archived.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Counts the retention period from the session\'s last activity. Expired sessions are deleted.',
   'settings.sourceControl.ssh.title': 'SSH keys',
   'settings.sourceControl.ssh.load': 'Show keys',
   'settings.sourceControl.ssh.discover': 'Find keys in ~/.ssh',
@@ -1133,8 +1136,6 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'Sessions in work',
   'settings.openchamber.sessionWork.info': 'A block in the sidebar, under Chats, for the sessions you\'re working in. A session goes there when you send a message in it. By default, it appears only in this block; turn on "Also show in work under projects" in the sidebar menu to keep it in its project too. VS Code always shows sessions in their projects. Mark a session done with the check or the session menu. When a turn looks like the end of the work, the check turns grey as a hint.',
   'settings.openchamber.sessionWork.field.enabled': 'Show sessions in work',
-  'settings.openchamber.sessionRetention.field.onlyArchived': 'Only archived sessions',
-  'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Uses Delete and counts the retention period from archiving. Unarchived sessions are kept.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'Deletes expired archived sessions. Keeps the 5 most recently archived sessions, the open session, running sessions and shared sessions. A parent is kept if deleting it would also delete a protected child.',
   'settings.openchamber.sessionRetention.tooltip': 'Archives or deletes unarchived sessions based on last activity. Keeps the 5 most recent sessions, the open session, running sessions and shared sessions. Archived sessions are kept. A parent is kept if deleting it would also delete a protected child.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Enable auto-cleanup',
