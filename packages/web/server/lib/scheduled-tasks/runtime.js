@@ -947,7 +947,7 @@ export const createScheduledTasksRuntime = (deps) => {
         }
       }
 
-      let status = 'success';
+      let status = 'sent';
       let sessionID;
       let sessionDirectory;
       let durationMs = 0;
@@ -988,9 +988,8 @@ export const createScheduledTasksRuntime = (deps) => {
         sessionID = result.sessionID;
         sessionDirectory = result.directory;
         durationMs = result.durationMs;
-        status = 'success';
         logger.info?.(
-          '[ScheduledTasks] run completed',
+          '[ScheduledTasks] run dispatched',
           { projectID, taskID, status, reason, sessionID, durationMs }
         );
       } catch (error) {
@@ -1102,7 +1101,7 @@ export const createScheduledTasksRuntime = (deps) => {
         // The session already ran — surface persist failure without treating a
         // successful dispatch as a hard run failure (manual runNow would 500).
         return {
-          ok: status === 'success',
+          ok: status === 'sent',
           status,
           sessionID,
           directory: sessionDirectory,
@@ -1125,7 +1124,7 @@ export const createScheduledTasksRuntime = (deps) => {
       }
 
       return {
-        ok: status === 'success',
+        ok: status === 'sent',
         status,
         sessionID,
         directory: sessionDirectory,

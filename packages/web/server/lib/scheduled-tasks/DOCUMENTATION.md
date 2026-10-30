@@ -164,6 +164,14 @@ reaches it on its next run without editing it. With nothing set, the session is
 created without a model or agent and OpenCode applies its own. A pinned value
 stored next to `useDefaults` is kept only for when the task is pinned again.
 
+## Dispatch outcome
+
+A new-session run persists `lastStatus: 'sent'` after dispatch. The runtime does
+not observe the session's later outcome, so it cannot record turn completion.
+A failed or timed-out dispatch records `'error'`. The task-run event preserves
+`sent` through the shared client translator. Stored `success` values from older
+runs remain unchanged.
+
 ## Files
 
 - `packages/web/server/lib/scheduled-tasks/runtime.js`
