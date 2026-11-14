@@ -448,6 +448,37 @@ describe('opencode plugins data layer', () => {
     ]);
   });
 
+  test('lists a plugin package reached through a symlink', () => {
+    const dir = path.join(projectDir, '.opencode', 'plugins');
+    fs.mkdirSync(dir, { recursive: true });
+    const packageDir = path.join(rootDir, 'external-package');
+    fs.mkdirSync(packageDir, { recursive: true });
+    // A junction is the Windows directory link that needs no privilege.
+    fs.symlinkSync(packageDir, path.join(dir, 'linked-package'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    expect(plugins.listPluginDirFiles(projectDir).filter((file) => file.scope === 'project')).toEqual([
+      expect.objectContaining({ fileName: 'linked-package', scope: 'project', kind: 'package' }),
+    ]);
+  });
+
+  test('lists a plugin file reached through a symlink', () => {
+    const dir = path.join(projectDir, '.opencode', 'plugins');
+    fs.mkdirSync(dir, { recursive: true });
+    const externalFile = path.join(rootDir, 'external-plugin.js');
+    fs.writeFileSync(externalFile, 'export default {}', 'utf8');
+    const linkPath = path.join(dir, 'linked-file.js');
+    try {
+      fs.symlinkSync(externalFile, linkPath, 'file');
+    } catch (error) {
+      // Windows needs Developer Mode or an elevated shell for a file link.
+      if (error?.code === 'EPERM' || error?.code === 'EACCES') return;
+      throw error;
+    }
+
+    expect(plugins.listPluginDirFiles(projectDir).find((file) => file.fileName === 'linked-file.js'))
+      .toEqual(expect.objectContaining({ kind: 'file', scope: 'project', absolutePath: linkPath }));
+  });
+
   test('records a switch in OpenChamber and leaves the OpenCode config alone', () => {
     const userRule = { action: 'integration.use', resource: 'skill:other', effect: 'deny' };
     writeJson(userConfigPath, { plugins: ['leakshield'], policies: [userRule] });

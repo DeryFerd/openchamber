@@ -1668,6 +1668,25 @@ const getPluginDir = (scope: PluginScope, workingDirectory?: string | null): str
   return path.join(OPENCODE_CONFIG_DIR, 'plugins');
 };
 
+/**
+ * Whether an entry is a plugin file, following a symlink to the file it points
+ * at. OpenCode loads a plugin reached through a link, so the listing has to see
+ * that entry too: a Dirent for a link is neither a file nor a directory.
+ */
+const pluginDirEntryIsFile = (
+  entry: { isFile(): boolean; isSymbolicLink(): boolean },
+  absolutePath: string,
+): boolean => {
+  if (entry.isFile()) return true;
+  if (!entry.isSymbolicLink()) return false;
+  try {
+    return fs.statSync(absolutePath).isFile();
+  } catch {
+    // A link whose target is gone is not a plugin.
+    return false;
+  }
+};
+
 const getPluginFileTarget = (id: string, workingDirectory?: string): { scope: PluginScope; fileName: string; filePath: string } => {
   const decoded = decodePluginId(id);
   if (decoded.prefix !== 'file') {
@@ -1690,10 +1709,10 @@ export const listPluginDirFiles = (workingDirectory?: string, switchDirectory?: 
     }
     if (!fs.existsSync(dir)) continue;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
+      const absolutePath = path.join(dir, entry.name);
+      if (!pluginDirEntryIsFile(entry, absolutePath)) continue;
       try {
         const fileName = validatePluginFileName(entry.name);
-        const absolutePath = path.join(dir, fileName);
         const policyResource = `plugin:${absolutePath}`;
         const file: PluginFile = {
           id: encodePluginId('file', `${scope}:${fileName}`),

@@ -217,6 +217,25 @@ function pluginDirsForScope(scope, workingDirectory) {
   ];
 }
 
+/**
+ * What a directory entry is, following a symlink to the file or directory it
+ * points at. OpenCode loads a plugin reached through a link, so the listing has
+ * to see that entry too: a Dirent for a link is neither a file nor a directory.
+ */
+function pluginDirEntryKind(entry, absolutePath) {
+  if (entry.isFile()) return 'file';
+  if (entry.isDirectory()) return 'directory';
+  if (!entry.isSymbolicLink()) return null;
+  try {
+    const stat = fs.statSync(absolutePath);
+    if (stat.isFile()) return 'file';
+    return stat.isDirectory() ? 'directory' : null;
+  } catch {
+    // A link whose target is gone is not a plugin.
+    return null;
+  }
+}
+
 function fileTargetFromId(id, workingDirectory) {
   const decoded = decodePluginId(id);
   if (decoded.prefix !== 'file') {
@@ -512,14 +531,15 @@ function listPluginDirFiles(workingDirectory, switchStore) {
       .filter((entry) => !entry.name.includes('..') && !entry.name.startsWith('.'))
       .flatMap((entry) => {
         const absolutePath = path.join(dir, entry.name);
-        if (entry.isFile() && PLUGIN_FILE_NAME_PATTERN.test(entry.name)) {
+        const entryKind = pluginDirEntryKind(entry, absolutePath);
+        if (entryKind === 'file' && PLUGIN_FILE_NAME_PATTERN.test(entry.name)) {
           // Only files in the v2 `plugins/` directory are editable through
           // the file id; a v1 `plugin/` file is listed for what it is.
           return editable
             ? [{ id: encodePluginId('file', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'file', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }]
             : [{ id: encodePluginId('legacy', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }];
         }
-        if (entry.isDirectory()) {
+        if (entryKind === 'directory') {
           // A plugin package (a directory with its own entry point): OpenCode
           // loads it, OpenChamber only lists it.
           return [{ id: encodePluginId(editable ? 'package' : 'legacyPackage', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }];
