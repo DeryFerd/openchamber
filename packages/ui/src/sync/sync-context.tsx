@@ -46,7 +46,7 @@ import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { recordDirectoryRecoveryEvent, selectHeldSessionStatuses } from "./directory-recovery-snapshots"
 import { hasPromptInFlight, withPromptsInFlight } from "./prompts-in-flight"
-import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
+import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, dropLocallySettledForms, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { adoptSessionMove, setActionRefs } from "./session-actions"
 import { subscribeSessionAdmission } from "./session-admission"
 import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
@@ -1531,9 +1531,11 @@ export async function resyncBlockingRequestsForDirectory(
     )
     const pendingForms = await opencodeClient.listPendingForms({ directories: [directory] })
     if (!isCurrentRuntime()) return false
-    noteQuestionFormSnapshot(directory, pendingForms)
+    // The read can answer with a form this client cancelled after it left.
+    const liveForms = dropLocallySettledForms(pendingForms)
+    noteQuestionFormSnapshot(directory, liveForms)
     const grouped: Record<string, FormRequest[]> = {}
-    for (const form of pendingForms) {
+    for (const form of liveForms) {
       if (!form?.id || !form.sessionID) continue
       if (!candidateIds.has(form.sessionID)) continue
       const list = grouped[form.sessionID]

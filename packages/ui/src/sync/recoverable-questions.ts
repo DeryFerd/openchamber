@@ -184,6 +184,16 @@ function closeQuestion(formID: string, outcome: ClosedOutcome): void {
 export const noteLocalFormReplied = (formID: string): void => closeQuestion(formID, "answered")
 export const noteLocalFormCancelled = (formID: string): void => closeQuestion(formID, "dismissed")
 
+/**
+ * Pending forms from a server read, minus the ones this client settled itself.
+ * A read that left before a cancel or a reply landed can still list that form,
+ * and merging it back would put the card on the page again (#6945).
+ */
+export function dropLocallySettledForms<T extends { id: string }>(forms: readonly T[]): T[] {
+  const { outcomes } = useRecoverableQuestionsStore.getState()
+  return outcomes.size === 0 ? [...forms] : forms.filter((form) => !outcomes.has(form.id))
+}
+
 export function submitRecoveredAnswer(formID: string, send: () => Promise<void>): Promise<void> {
   const state = useRecoverableQuestionsStore.getState()
   if (state.outcomes.has(formID)) return Promise.resolve()

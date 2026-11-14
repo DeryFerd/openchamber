@@ -103,6 +103,7 @@ mock.module("@/components/ui", () => ({
 
 import { INITIAL_STATE, type State } from "../types"
 import { ChildStoreManager, type DirectoryStore } from "../child-store"
+import { noteLocalFormCancelled, noteQuestionFormSnapshot, resetRecoverableQuestions } from "../recoverable-questions"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { subscribeFileTreeChanges, type FileTreeChange } from "@/lib/fileTreeChanges"
@@ -153,6 +154,7 @@ describe("resyncBlockingRequestsForDirectory", () => {
     pendingPermissionsResponse = []
     pendingFormsShouldThrow = false
     pendingPermissionsShouldThrow = false
+    resetRecoverableQuestions()
     setActiveSession("", "")
   })
 
@@ -232,6 +234,25 @@ describe("resyncBlockingRequestsForDirectory", () => {
     })
     pendingFormsResponse = []
     pendingPermissionsResponse = []
+
+    await resyncBlockingRequestsForDirectory("/repo", store)
+
+    expect(store.getState().form["ses_a"]).toEqual(undefined)
+  })
+
+  test("does not put back a form this client cancelled while the read was in flight", async () => {
+    const cancelled: FormRequest = {
+      ...buildForm(),
+      id: "frm_cancelled",
+      metadata: { kind: "question", tool: { messageID: "msg_1", id: "tool_1" } },
+    }
+    const store = createDirectoryStore({ form: { ses_a: [cancelled] } })
+    // The card was on the page, so the client knows the form it cancels.
+    noteQuestionFormSnapshot("/repo", [cancelled])
+    // The read left before the cancel landed, so its answer still lists the form.
+    pendingFormsResponse = [cancelled]
+    noteLocalFormCancelled("frm_cancelled")
+    store.setState({ form: {} })
 
     await resyncBlockingRequestsForDirectory("/repo", store)
 
