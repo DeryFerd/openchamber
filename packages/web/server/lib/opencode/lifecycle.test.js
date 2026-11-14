@@ -283,6 +283,36 @@ describe('OpenCode lifecycle', () => {
     expect(runtime.testState.openCodeBaseUrl).toBe('http://seamus:4095');
   });
 
+  it('re-probes an external server that missed the startup readiness window', async () => {
+    vi.useFakeTimers();
+    let healthy = false;
+    globalThis.fetch = vi.fn(async () => {
+      if (!healthy) throw new Error('fetch failed');
+      return { ok: true, json: async () => ({ version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } }) };
+    });
+    const runtime = createRuntime({ reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })) }, {}, {
+      ENV_CONFIGURED_OPENCODE_PORT: null,
+      ENV_CONFIGURED_OPENCODE_HOST: { origin: 'http://seamus:4095', port: 4095 },
+      ENV_EFFECTIVE_PORT: 4095,
+      ENV_SKIP_OPENCODE_START: true,
+    });
+
+    try {
+      const bootstrap = runtime.bootstrapOpenCodeAtStartup();
+      await vi.advanceTimersByTimeAsync(25_000);
+      await bootstrap;
+      expect(runtime.testState.isOpenCodeReady).toBe(false);
+
+      healthy = true;
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(runtime.testState.isOpenCodeReady).toBe(true);
+      expect(runtime.testState.lastOpenCodeError).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('attaches to an OPENCODE_HOST running OpenCode v1 instead of starting a managed server', async () => {
     const requested = [];
     globalThis.fetch = vi.fn(async (url) => {

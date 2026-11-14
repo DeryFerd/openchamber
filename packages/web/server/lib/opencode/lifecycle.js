@@ -25,6 +25,8 @@ const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
 const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
 const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
 const BOOTSTRAP_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000];
+// A configured external OpenCode may come up after the startup window closes.
+const EXTERNAL_READINESS_RECHECK_MS = 5_000;
 const OPENCODE_HEALTH_PATH = '/api/info';
 const OPENCODE_REQUIRED_MAJOR_VERSION = 2;
 
@@ -713,6 +715,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   let lastBootstrapError = null;
   let bootstrapRetryCount = 0;
   let bootstrapRetryRun = null;
+  let externalReadinessTimer = null;
 
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -1155,6 +1158,49 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     return { reloaded: !external, external };
   };
 
+  const stopExternalReadinessRecheck = () => {
+    if (!externalReadinessTimer) return;
+    clearInterval(externalReadinessTimer);
+    externalReadinessTimer = null;
+  };
+
+  /**
+   * A configured external OpenCode can outlive the single readiness window that
+   * startup allows, and nothing else watches it: the health monitor only speaks
+   * for a process OpenChamber started. This probe opens the gate once that
+   * server answers, and stops as soon as it does.
+   */
+  const recheckExternalReadiness = async () => {
+    if (state.isShuttingDown || !state.isExternalOpenCode) {
+      stopExternalReadinessRecheck();
+      return;
+    }
+    if (state.isOpenCodeReady) {
+      stopExternalReadinessRecheck();
+      return;
+    }
+    const probePort = state.openCodePort ?? env.ENV_EFFECTIVE_PORT;
+    if (!probePort) return;
+    const probeOrigin = state.openCodeBaseUrl ?? env.ENV_CONFIGURED_OPENCODE_HOST?.origin;
+    if (!await probeExternalOpenCode(probePort, probeOrigin)) return;
+    state.openCodeBaseUrl = probeOrigin ?? null;
+    setOpenCodePort(probePort);
+    state.isOpenCodeReady = true;
+    state.lastOpenCodeError = null;
+    state.openCodeNotReadySince = 0;
+    diagnosticJournal.record('external connected');
+    syncToHmrState();
+    stopExternalReadinessRecheck();
+  };
+
+  const scheduleExternalReadinessRecheck = () => {
+    if (externalReadinessTimer || state.isShuttingDown) return;
+    externalReadinessTimer = setInterval(() => {
+      void recheckExternalReadiness().catch(() => {});
+    }, EXTERNAL_READINESS_RECHECK_MS);
+    externalReadinessTimer.unref?.();
+  };
+
   const bootstrapOpenCodeAtStartup = async () => {
     const bootstrapStartedAt = performance.now();
     let bootstrapError = null;
@@ -1248,6 +1294,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         // proved itself must not keep reporting ready to startup diagnostics.
         state.isOpenCodeReady = false;
         console.error(`OpenCode readiness check failed: ${error.message}`);
+        if (state.isExternalOpenCode) scheduleExternalReadinessRecheck();
       }
     } catch (error) {
       bootstrapError = error;
