@@ -40,7 +40,15 @@ export const isOpaqueOriginRequest = (req: Pick<SecurityRequest, 'headers'> | nu
 export const allowsLocalDevOrigins = (env: NodeJS.ProcessEnv) => env.OPENCHAMBER_ELECTRON_DEV === '1' || env.OPENCHAMBER_ALLOW_DEV_ORIGINS === '1';
 export const isLocalDevClientOrigin = (origin: string) => /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
 
-const PACKAGED_FRAME_ANCESTORS = ['openchamber-ui://app', 'capacitor://localhost', 'https://localhost'];
+export const PACKAGED_CLIENT_ORIGINS = Object.freeze([
+  'openchamber-ui://app',
+  'capacitor://localhost',
+  'https://localhost',
+]);
+
+export const buildCorsOriginSet = () => new Set([...PACKAGED_CLIENT_ORIGINS, 'http://localhost']);
+
+const PACKAGED_FRAME_ANCESTORS = PACKAGED_CLIENT_ORIGINS;
 const FRAME_ANCESTOR_SOURCE = /^(?:\*|https?:\/\/[a-z0-9.-]+(?::(?:\d{1,5}|\*))?)$/i;
 
 export const buildFrameAncestorsPolicy = ({ allowLocalDevOrigins = false, extra = '' }: FrameAncestorsOptions = {}) => {
@@ -61,11 +69,7 @@ export const isPasswordlessSocketOriginAllowed = async (req: SecurityRequest, is
 
 export const createRequestSecurityRuntime = (deps: RequestSecurityDependencies) => {
   const { readSettingsFromDiskMigrated, allowLocalDevOrigins = false } = deps;
-  const packagedClientOrigins = new Set([
-    'openchamber-ui://app',
-    'capacitor://localhost',
-    'https://localhost',
-  ]);
+  const packagedClientOrigins = new Set(PACKAGED_CLIENT_ORIGINS);
 
   const getUiSessionTokenFromRequest = (req: Pick<SecurityRequest, 'headers'> | null | undefined) => {
     const cookieHeader = req?.headers?.cookie;
